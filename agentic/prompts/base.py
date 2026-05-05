@@ -586,9 +586,37 @@ ask_user:
 
 plan_tools (run multiple INDEPENDENT tools as a wave — use when 2+ tools have NO dependencies):
 ```json
-{{"action": "plan_tools", "tool_plan": {{"steps": [{{"tool_name": "execute_nmap", "tool_args": {{"target": "10.0.0.1", "args": "-sV"}}, "rationale": "Port discovery"}}, {{"tool_name": "query_graph", "tool_args": {{"question": "What is known about 10.0.0.1?"}}, "rationale": "Check existing intel"}}], "plan_rationale": "Independent tools, no dependency between them"}}, ...}}
+{{"action": "plan_tools", "tool_plan": {{"steps": [{{"tool_name": "execute_nmap", "tool_args": {{"args": "-sV 10.0.0.1"}}, "rationale": "Port discovery"}}, {{"tool_name": "query_graph", "tool_args": {{"question": "What is known about 10.0.0.1?"}}, "rationale": "Check existing intel"}}], "plan_rationale": "Independent tools, no dependency between them"}}, ...}}
 ```
 Do NOT include tools that depend on another tool's output — plan those in the NEXT iteration after seeing results.
+
+**tool_args shape (CRITICAL — per the `## Tool Arguments` section below)**. Tools fall into FOUR shape buckets — pick the right one per tool name:
+
+  Shape A — `{{"args": "<full CLI flag string, binary name stripped>"}}`
+  Tools: cve_intel, execute_nuclei, execute_curl, execute_httpx, execute_naabu, execute_jsluice, execute_katana, execute_subfinder, execute_gau, execute_nmap, execute_amass, execute_hydra, execute_wpscan, execute_arjun, execute_ffuf.
+  Examples: `{{"args": "-sV -p 22 10.0.0.1"}}` (nmap), `{{"args": "-u http://x -d 3 -jc -silent"}}` (katana), `{{"args": "-u http://x -sc -title -td -j -silent"}}` (httpx).
+
+  Shape B — `{{"command": "<full shell command>"}}`
+  Tools: kali_shell, metasploit_console.
+
+  Shape C — typed kwargs declared per tool (multi-key JSON object). Use the EXACT keys shown in `## Tool Arguments`.
+    query_graph        -> {{"question": "..."}}
+    web_search         -> {{"query": "...", "include_sources": ["nvd"], "min_cvss": 9.0}}
+    google_dork        -> {{"query": "..."}}
+    shodan             -> {{"action": "host"|"search"|"dns_reverse"|"dns_domain"|"count", "query": "...", "ip": "...", "domain": "..."}}
+    execute_code       -> {{"code": "...", "language": "python", "filename": "exploit"}}
+    execute_playwright -> {{"url": "...", "selector": "...", "format": "text"|"html"}}  OR  {{"script": "..."}}
+    tradecraft_lookup  -> {{"resource_id": "...", "query": "..."}}
+
+  Shape D — no args: msf_restart -> {{}}
+
+  WRONG (Pydantic rejects every one of these with "Unexpected keyword argument"):
+    {{"url": "...", "depth": 3, "jc": true}} on execute_katana
+    {{"target": "...", "ports": "22", "flags": "-sV"}} on execute_nmap
+    {{"targets": ["..."]}} on execute_httpx
+    {{"host": "...", "ports": "1-1000"}} on execute_naabu
+    "-w wordlist -u https://x" (raw string) on ANY tool
+  RIGHT: Shape A — `{{"args": "<CLI flag string>"}}`. Never invent kwargs like url/target/host/port/depth/flags on Shape A tools.
 
 {fireteam_example_section}complete: `{{"action": "complete", "completion_reason": "Successfully exploited target", ...}}`
 
@@ -1613,7 +1641,7 @@ RETURN 'Vulnerability' as type, v.id as id, v.name as name, v.severity as severi
 UNION ALL
 MATCH (c:CVE)
 RETURN 'CVE' as type, c.id as id, c.id as name, c.severity as severity, c.source as source
-LIMIT 50
+LIMIT 500
 ```
 
 ### Finding Scanner Vulnerabilities (Vulnerability nodes only)
@@ -1622,7 +1650,7 @@ LIMIT 50
 MATCH (v:Vulnerability)
 WHERE v.severity = "critical"
 RETURN v.name, v.source, v.cvss_score
-LIMIT 20
+LIMIT 500
 
 // Web vulnerabilities on specific subdomain (via Service chain or direct HAS_BASE_URL)
 MATCH (s:Subdomain {{name: "api.example.com"}})-[:RESOLVES_TO]->(:IP)-[:HAS_PORT]->(:Port)-[:RUNS_SERVICE]->(:Service)-[:SERVES_URL]->(b:BaseURL)
@@ -1641,13 +1669,13 @@ RETURN i.address, v.name, v.cvss_score
 // All CVEs in the system
 MATCH (c:CVE)
 RETURN c.id, c.severity, c.cvss, c.description
-LIMIT 20
+LIMIT 500
 
 // High severity CVEs
 MATCH (c:CVE)
 WHERE c.severity IN ["HIGH", "CRITICAL"] OR c.cvss >= 7.0
 RETURN c.id, c.severity, c.cvss
-LIMIT 20
+LIMIT 500
 
 // CVEs linked to detected technologies
 MATCH (t:Technology)-[:HAS_KNOWN_CVE]->(c:CVE)
@@ -1739,7 +1767,7 @@ ORDER BY secret_count DESC
 MATCH (d:Domain)-[:HAS_TRUFFLEHOG_SCAN]->(ts:TrufflehogScan)-[:HAS_REPOSITORY]->(tr:TrufflehogRepository)-[:HAS_FINDING]->(tf:TrufflehogFinding)
 WHERE tf.verified = true
 RETURN tr.name AS repository, tf.detector_name, tf.file, tf.line, tf.redacted
-LIMIT 50
+LIMIT 500
 
 // TruffleHog scan summary
 MATCH (ts:TrufflehogScan)
@@ -1797,7 +1825,7 @@ UNION ALL
 MATCH (jf:JsReconFinding)
 WHERE jf.finding_type IN ['dependency_confusion', 'source_map_exposure', 'dom_sink']
 RETURN 'JS Analysis' as source, jf.finding_type as type, 'js_recon' as tool, jf.source_url as location, jf.severity as severity
-LIMIT 50
+LIMIT 500
 ```
 
 ### CISA KEV (Known Weaponized Vulnerabilities)
@@ -1831,7 +1859,7 @@ RETURN 'Agent' as source, f.target_ip, f.cve_ids, f.evidence
 MATCH (ac:AttackChain)
 RETURN ac.chain_id, ac.title, ac.status, ac.attack_path_type, ac.total_steps, ac.created_at
 ORDER BY ac.created_at DESC
-LIMIT 10
+LIMIT 500
 
 // Steps in a specific chain (ordered)
 MATCH (ac:AttackChain {{chain_id: "session-123"}})-[:HAS_STEP]->(s:ChainStep)
@@ -1843,18 +1871,18 @@ MATCH (f:ChainFinding)
 WHERE f.severity IN ["critical", "high"]
 RETURN f.finding_type, f.title, f.severity, f.evidence, f.chain_id
 ORDER BY f.created_at DESC
-LIMIT 20
+LIMIT 500
 
 // Findings and exploit successes 
 MATCH (f:ChainFinding {{finding_type: "exploit_success"}})
 RETURN f.target_ip, f.target_port, f.cve_ids, f.metasploit_module, f.evidence
-LIMIT 20
+LIMIT 500
 
 // Failed attempts with lessons learned
 MATCH (fl:ChainFailure)
 RETURN fl.failure_type, fl.tool_name, fl.error_message, fl.lesson_learned, fl.chain_id
 ORDER BY fl.created_at DESC
-LIMIT 20
+LIMIT 500
 
 // Cross-session: what was tried against a specific IP
 MATCH (s:ChainStep)-[:STEP_TARGETED]->(i:IP {{address: "10.0.0.5"}})
@@ -1896,6 +1924,46 @@ MATCH (s:Subdomain)-[:USES_TECHNOLOGY]->(t:Technology)
 RETURN s.name, collect(t.name) as technologies
 ```
 
+### Recurring Lookups
+```cypher
+// Asset hierarchy: hosts/IPs/ports/services/technologies/vulnerabilities/CVEs in one query
+MATCH (d:Domain)-[:HAS_SUBDOMAIN]->(s:Subdomain)-[:RESOLVES_TO]->(ip:IP)
+OPTIONAL MATCH (ip)-[:HAS_PORT]->(p:Port)
+OPTIONAL MATCH (p)-[:RUNS_SERVICE]->(svc:Service)
+OPTIONAL MATCH (p)-[:HAS_TECHNOLOGY]->(tech:Technology)
+OPTIONAL MATCH (ip)-[:HAS_VULNERABILITY]->(v:Vulnerability)-[:HAS_CVE]->(cve:CVE)
+OPTIONAL MATCH (tech)-[:HAS_KNOWN_CVE]->(tech_cve:CVE)
+RETURN d.name AS domain, s.name AS subdomain, ip.address AS ip,
+       p.number AS port, svc.name AS service, svc.product AS product,
+       svc.version AS version, tech.name AS technology,
+       collect(DISTINCT v.name) AS vulnerabilities,
+       collect(DISTINCT cve.id) + collect(DISTINCT tech_cve.id) AS cves
+ORDER BY ip.address, p.number
+LIMIT 100
+
+// Secrets/credentials/tokens for a host (live web resources via JS recon).
+// Subdomain backlink is optional (some BaseURLs aren't linked to a Subdomain).
+// For repository-scanned secrets, also query TrufflehogFinding (see sections above).
+MATCH (b:BaseURL)
+OPTIONAL MATCH (b)-[:HAS_JS_FILE]->(js:JsReconFinding)-[:HAS_SECRET]->(sec:Secret)
+OPTIONAL MATCH (b)<-[:HAS_BASE_URL|HAS_BASEURL]-(s:Subdomain)
+WHERE sec IS NOT NULL
+RETURN s.name AS host, b.url AS base_url, js.source_url AS js_file,
+       sec.secret_type AS kind, sec.severity AS severity, sec.value AS value, sec.source AS source
+LIMIT 50
+
+// Endpoints + parameters + headers for a base URL (web app surface)
+MATCH (b:BaseURL) WHERE b.url CONTAINS 'example.com'
+OPTIONAL MATCH (b)-[:HAS_ENDPOINT]->(e:Endpoint)
+OPTIONAL MATCH (e)-[:HAS_PARAMETER]->(p:Parameter)
+OPTIONAL MATCH (b)-[:HAS_HEADER]->(h:Header)
+RETURN b.url AS base_url, e.path AS path, e.method AS method, e.status_code AS status,
+       p.name AS param_name, p.position AS param_position, p.is_injectable AS param_injectable,
+       h.name AS header_name, h.value AS header_value
+ORDER BY b.url, e.path
+LIMIT 500
+```
+
 ## Query Rules
 
 1. **CRITICAL - Query BOTH Vulnerability AND CVE nodes** when user asks about "vulnerabilities":
@@ -1907,7 +1975,7 @@ RETURN s.name, collect(t.name) as technologies
    - TrufflehogFinding nodes = secrets found in git repositories via TruffleHog
    - JsReconFinding nodes = non-secret JS findings (dependency confusion, source maps, DOM sinks, frameworks)
    - Use UNION ALL to combine results from all node types
-3. **Always use LIMIT** to restrict results (default: 20-50)
+3. **Always use LIMIT** to restrict results (default: 500), increase for special cases.
 4. **Relationship direction matters** - follow the arrows exactly as documented
 5. **Use property filters** in WHERE clauses, not relationship traversals for filtering
 6. **Check vulnerability source** when querying Vulnerability nodes:

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+
+## [4.7.1] - 2026-05-05
+
+### Fixed
+
+- **Empty engagement state in fireteam members** -- `FireteamMemberState` TypedDict was missing `_parent_*` fields, so LangGraph stripped parent chain memory during state merge. Added the four fields ([agentic/state.py:382-447](agentic/state.py#L382-L447))
+- **Same-iteration deploy dropped freshly-analyzed step** -- when iter-N both analyzed output and deployed, the new step lived in `_completed_step` while `execution_trace` was stale. Added `_snapshot_parent_trace()` helper that merges in the missing step ([fireteam_deploy_node.py](agentic/orchestrator_helpers/nodes/fireteam_deploy_node.py))
+- **All MCP tool calls failed validation from members** -- LLM emitted per-flag kwargs (`{"url":..., "depth":3}`) instead of `{"args": "..."}`. Replaced contradictory schema docs with a 4-bucket spec covering all 31 tools (Shape A: CLI args, B: command, C: typed kwargs, D: empty). Same fix in parent `plan_tools` example ([prompts/base.py:589](agentic/prompts/base.py#L589))
+- **Captured artifacts truncated** -- JWTs, `.env` dumps, hashes cut at 150-600 chars in `format_chain_context`. Bumped all five render caps + member-side `exploit_success` evidence to 10000
+
+### Added
+
+- **Chain context propagation parent → members** -- `_build_member_state` snapshots parent's findings/failures/decisions/trace; member prompt renders `## Engagement state` (frozen at deploy) and `## Your local progress in this run` via shared `format_chain_context()`. Source attribution `(from <agent>)` at every hop
+- **Self-Check section in member prompt** ([fireteam_member_think_node.py:328-352](agentic/orchestrator_helpers/nodes/fireteam_member_think_node.py#L328-L352)) -- four rules re-read each iteration: find-rate test, duplicate-target test, negative-result test, findings-emission rule
+- **Cypher Recurring Lookups** ([prompts/base.py:1927-1965](agentic/prompts/base.py#L1927-L1965)) -- three schema-verified queries: asset hierarchy with CVE join, secrets via JS recon, endpoints + parameters + headers
+- **Diagnostic SNAPSHOT logging** in `_build_member_state` for future debugging
+- **Tests** -- 294 pass; added `test_summary_analysis_truncated_to_10000`, updated `test_evidence_truncated`
+
+### Changed
+
+- **Member prompt structure** -- old 200-char prose `## Your execution trace so far` removed; replaced by the two sibling sections rendered via `format_chain_context()`, matching the root agent's chain context block
+
+---
+
 ## [4.7.0] - 2026-05-04
 
 ### Added

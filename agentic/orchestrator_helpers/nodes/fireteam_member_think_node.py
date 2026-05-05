@@ -19,7 +19,7 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from state import LLMDecision, FireteamMemberState, TargetInfo
+from state import LLMDecision, FireteamMemberState, TargetInfo, format_chain_context
 from orchestrator_helpers.parsing import try_parse_llm_decision
 from orchestrator_helpers.json_utils import normalize_content, json_dumps_safe
 import orchestrator_helpers.chain_graph_writer as chain_graph
@@ -240,8 +240,15 @@ _MEMBER_SYSTEM_PROMPT = """You are a Fireteam member agent specializing in a foc
 ## Target context (inherited from parent, snapshot)
 {target_info}
 
-## Your execution trace so far
-{trace_summary}
+## Engagement state (from the root agent and prior fireteam members)
+This is everything the engagement already knows at the moment you were dispatched.
+Findings carry source attribution (`from <agent>`); do NOT re-discover what is listed here.
+Tools, payloads, captured artifacts (tokens, credentials, endpoints) and prior failures
+are all surfaced — read this first before planning your own actions.
+{parent_chain_context}
+
+## Your local progress in this run
+{local_chain_context}
 
 ## Available tools (filtered by your skills and current phase)
 {tool_list}
@@ -256,13 +263,39 @@ Emit EXACTLY ONE JSON object matching LLMDecision. ALL of these fields are REQUI
   - `action`     : one of "use_tool" | "plan_tools" | "complete"
 
 Action-specific required fields:
-  - action="use_tool"   -> `tool_name` (string) + `tool_args` (OBJECT, never a CLI string)
+  - action="use_tool"   -> `tool_name` (string) + `tool_args` (JSON object — shape depends on the tool, see below)
   - action="plan_tools" -> `tool_plan` = {{"steps": [{{"tool_name": "...", "tool_args": {{...}}, "rationale": "..."}}, ...], "plan_rationale": "..."}}
   - action="complete"   -> `completion_reason` (string)
 
-CRITICAL: `tool_args` is ALWAYS a JSON object keyed by argument name — NEVER a raw flag string.
-  WRONG: "tool_args": "-w wordlist.txt -u https://example.com"
-  RIGHT: "tool_args": {{"wordlist": "wordlist.txt", "url": "https://example.com"}}
+CRITICAL: `tool_args` shape is per-tool. The `## Tool argument schemas` section above
+(rendered from the live tool registry) is the source of truth — copy its keys exactly.
+Tools fall into FOUR shape buckets — pick the right one per tool name:
+
+  Shape A — `{{"args": "<full CLI flag string, binary name stripped>"}}`
+  Tools: cve_intel, execute_nuclei, execute_curl, execute_httpx, execute_naabu, execute_jsluice, execute_katana, execute_subfinder, execute_gau, execute_nmap, execute_amass, execute_hydra, execute_wpscan, execute_arjun, execute_ffuf.
+  Examples: `{{"args": "-sV -p 22 10.0.0.1"}}` (nmap), `{{"args": "-u http://x -d 3 -jc -silent"}}` (katana), `{{"args": "-u http://x -sc -title -td -j -silent"}}` (httpx).
+
+  Shape B — `{{"command": "<full shell command>"}}`
+  Tools: kali_shell, metasploit_console.
+
+  Shape C — typed kwargs declared per tool (multi-key JSON object). Use the EXACT keys shown in `## Tool argument schemas`.
+    query_graph        -> {{"question": "..."}}
+    web_search         -> {{"query": "...", "include_sources": ["nvd"], "min_cvss": 9.0}}
+    google_dork        -> {{"query": "..."}}
+    shodan             -> {{"action": "host"|"search"|"dns_reverse"|"dns_domain"|"count", "query": "...", "ip": "...", "domain": "..."}}
+    execute_code       -> {{"code": "...", "language": "python", "filename": "exploit"}}
+    execute_playwright -> {{"url": "...", "selector": "...", "format": "text"|"html"}}  OR  {{"script": "..."}}
+    tradecraft_lookup  -> {{"resource_id": "...", "query": "..."}}
+
+  Shape D — no args: msf_restart -> {{}}
+
+  WRONG (Pydantic rejects every one of these with "Unexpected keyword argument"):
+    {{"url": "...", "depth": 3, "jc": true}} on execute_katana
+    {{"target": "...", "ports": "22", "flags": "-sV"}} on execute_nmap
+    {{"targets": ["..."]}} on execute_httpx
+    {{"host": "...", "ports": "1-1000"}} on execute_naabu
+    "-w wordlist -u https://x" (raw string) on ANY tool
+  RIGHT: Shape A — `{{"args": "<CLI flag string>"}}`. Never invent kwargs like url/target/host/port/depth/flags on Shape A tools.
 
 Example use_tool:
 ```json
@@ -271,25 +304,52 @@ Example use_tool:
   "reasoning": "Version banner reveals CVE-applicable versions quickly.",
   "action": "use_tool",
   "tool_name": "execute_nmap",
-  "tool_args": {{"target": "10.0.0.1", "ports": "22", "flags": "-sV"}}
+  "tool_args": {{"args": "-sV -p 22 10.0.0.1"}}
 }}
 ```
 
 Example plan_tools:
 ```json
 {{
-  "thought": "Three independent endpoints to probe.",
+  "thought": "Three independent probes on the same host.",
   "reasoning": "Fan out in one wave for speed.",
   "action": "plan_tools",
   "tool_plan": {{
     "steps": [
-      {{"tool_name": "execute_ffuf", "tool_args": {{"url": "https://x/FUZZ", "wordlist": "/usr/share/seclists/Discovery/Web-Content/common.txt"}}, "rationale": "path fuzz"}},
-      {{"tool_name": "execute_httpx", "tool_args": {{"targets": ["https://x"]}}, "rationale": "fingerprint"}}
+      {{"tool_name": "execute_ffuf", "tool_args": {{"args": "-u https://x/FUZZ -w /usr/share/seclists/Discovery/Web-Content/common.txt -mc 200,403"}}, "rationale": "path fuzz"}},
+      {{"tool_name": "execute_httpx", "tool_args": {{"args": "-u https://x -sc -title -server -td -fr -silent -j"}}, "rationale": "fingerprint"}},
+      {{"tool_name": "query_graph", "tool_args": {{"question": "What endpoints are known on x?"}}, "rationale": "graph cross-check"}}
     ],
     "plan_rationale": "parallel recon"
   }}
 }}
 ```
+
+## Self-Check Before Each Decision (read this every iteration)
+
+Before emitting your next tool call, look at "Your local progress in this run":
+
+1. **Find-rate test.** Compare your findings count NOW vs ~3 iterations ago.
+   If your tool count grew by 5 or more but findings count stayed flat — you
+   are looping. Emit `action=complete` with what you have. Do NOT keep probing.
+
+2. **Duplicate-target test.** Is your next planned tool call essentially the
+   same as something already in your trace? Same URL + same method + same
+   payload class (introspection / GET param fuzz / directory fuzz / known-path
+   probe) counts as duplicate even if flags differ slightly. If yes — DO NOT
+   re-run it. Pivot to a different surface or complete.
+
+3. **Negative-result test.** Did a previous probe return a known-negative
+   result (404 catch-all, identical baseline timing, generic 200 with no
+   reflection / no error / no signal)? Do not retry the same probe with a
+   minor flag tweak. Emit a `cleared_endpoint` finding so siblings know it's
+   dead, then pivot or complete.
+
+4. **Findings-emission rule.** When you complete, EVERY distinct discovery in
+   your trace MUST appear as a `chain_findings` entry in `output_analysis`
+   (e.g. one per service version, endpoint, technology, credential, cleared
+   surface). Findings flow to siblings via chain context; `completion_reason`
+   text is mostly discarded. A 0-finding completion is almost always wrong.
 
 When you have completed your task or can go no further, emit action="complete" with a `completion_reason`.
 Keep thought/reasoning concise. Prefer plan_tools when you can fire several independent tools at once.
@@ -469,14 +529,32 @@ def _build_member_prompt(state: FireteamMemberState) -> str:
     allowed_tools = get_allowed_tools_for_phase(phase)
     tool_args_section = build_tool_args_section(allowed_tools)
 
-    trace = state.get("execution_trace") or []
-    if trace:
-        trace_summary = "\n".join(
-            f"  {i+1}. {s.get('tool_name', '?')} -> {str(s.get('output_analysis') or s.get('output_summary') or '')[:200]}"
-            for i, s in enumerate(trace[-10:])
-        )
-    else:
-        trace_summary = "  (no steps yet)"
+    # Engagement-state snapshot from the parent at deploy time. Rendered with
+    # the same format_chain_context() the root agent uses in its own system
+    # prompt — gives the member every finding (with source_agent attribution),
+    # failed attempt, decision, and recent tool output the engagement already
+    # produced. Replaces the old 200-char-per-step trace summary which omitted
+    # captured artifacts (JWTs, credentials, cleared endpoints) and forced
+    # members to re-discover them.
+    parent_chain_context = format_chain_context(
+        state.get("_parent_chain_findings") or [],
+        state.get("_parent_chain_failures") or [],
+        state.get("_parent_chain_decisions") or [],
+        state.get("_parent_execution_trace") or [],
+        recent_iterations=20,
+    )
+
+    # Member-local progress in this run, rendered in the same format. Findings
+    # and failures the member has produced so far in its own iterations,
+    # surfaced separately so the LLM can distinguish "what the engagement
+    # already knew" from "what I have done in this turn".
+    local_chain_context = format_chain_context(
+        state.get("chain_findings_memory") or [],
+        state.get("chain_failures_memory") or [],
+        [],  # members cannot make phase decisions
+        state.get("execution_trace") or [],
+        recent_iterations=10,
+    )
 
     # Prefer the live (merged) target_info over the parent snapshot once the
     # member has started accumulating its own discoveries. Falls back to parent
@@ -496,7 +574,8 @@ def _build_member_prompt(state: FireteamMemberState) -> str:
         phase=phase,
         max_iterations=state.get("max_iterations", 15),
         target_info=target_str,
-        trace_summary=trace_summary,
+        parent_chain_context=parent_chain_context,
+        local_chain_context=local_chain_context,
         tool_list=tool_list,
         tool_args_section=tool_args_section,
         pending_output_section=pending_output_section,
@@ -900,7 +979,7 @@ async def fireteam_member_think_node(
                         target_port=details.get("target_port"),
                         cve_ids=details.get("cve_ids", []),
                         session_id=details.get("session_id"),
-                        evidence=details.get("evidence", "")[:500],
+                        evidence=details.get("evidence", "")[:10000],
                     )
                 except Exception as e:
                     logger.warning("member exploit_success write failed: %s", e)
@@ -1123,7 +1202,7 @@ async def fireteam_member_think_node(
                         target_port=details.get("target_port"),
                         cve_ids=details.get("cve_ids", []),
                         session_id=details.get("session_id"),
-                        evidence=details.get("evidence", "")[:500],
+                        evidence=details.get("evidence", "")[:10000],
                     )
                 except Exception as e:
                     logger.warning("member wave exploit_success write failed: %s", e)

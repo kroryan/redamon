@@ -406,6 +406,20 @@ class FireteamMemberState(TypedDict):
     chain_findings_memory: List[dict]
     chain_failures_memory: List[dict]
 
+    # Parent engagement-state snapshot at deploy time. Populated once by
+    # fireteam_deploy_node._build_member_state, then read every iteration by
+    # fireteam_member_think_node._build_member_prompt and rendered via
+    # format_chain_context (the same renderer the root agent uses). MUST be
+    # declared here — LangGraph strips undeclared keys from a TypedDict
+    # state on merge, so without these fields the member would never see
+    # the root agent's findings/failures/decisions/trace and would appear
+    # to start from a cold context (the bug that produced empty
+    # "Engagement state" sections in member prompts).
+    _parent_chain_findings: List[dict]
+    _parent_chain_failures: List[dict]
+    _parent_chain_decisions: List[dict]
+    _parent_execution_trace: List[dict]
+
     # Tool confirmation escalation (member does not block; parent handles)
     _pending_confirmation: Optional[dict]
 
@@ -1164,7 +1178,7 @@ def format_chain_context(
 
             evidence = (f.get("evidence") or "").strip()
             if evidence:
-                lines.append(f"    Evidence: {evidence[:150]}")
+                lines.append(f"    Evidence: {evidence[:10000]}")
 
             cves = f.get("related_cves") or []
             ips = f.get("related_ips") or []
@@ -1241,10 +1255,10 @@ def format_chain_context(
                         tname = t.get("tool_name") or "unknown"
                         tool_counts[tname] = tool_counts.get(tname, 0) + 1
                     tool_str = ", ".join(f"{c} {n}" for n, c in tool_counts.items())
-                    lines.append(f"  {it} [{phase}]: Wave[{tool_str}] ->{fail_marker} {analysis[:100]}")
+                    lines.append(f"  {it} [{phase}]: Wave[{tool_str}] ->{fail_marker} {analysis[:10000]}")
                 else:
                     tool_name = tools[0].get("tool_name") or "none"
-                    lines.append(f"  {it} [{phase}]: {tool_name} ->{fail_marker} {analysis[:100]}")
+                    lines.append(f"  {it} [{phase}]: {tool_name} ->{fail_marker} {analysis[:10000]}")
             lines.append("")
 
         if total_iterations > recent_iterations:
@@ -1320,7 +1334,7 @@ def format_chain_context(
 
                 # Analysis (once, not repeated per tool)
                 if analysis:
-                    lines.append(f"    Analysis: {analysis[:600]}")
+                    lines.append(f"    Analysis: {analysis[:10000]}")
 
             else:
                 # ── Single tool ──
@@ -1338,7 +1352,7 @@ def format_chain_context(
                 if args and tool != "none":
                     lines.append(f"    Args: {str(args)[:300]}")
                 if success:
-                    out_preview = (analysis or output or "")[:500]
+                    out_preview = (analysis or output or "")[:10000]
                     if out_preview:
                         lines.append(f"    OK | {out_preview}")
                     else:
