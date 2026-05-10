@@ -7,7 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from recon.partial_recon_modules.helpers import _is_valid_url, _is_valid_hostname
+from recon.partial_recon_modules.helpers import _is_valid_url, _is_valid_hostname, _should_include_root_domain
 from recon.partial_recon_modules.graph_builders import _build_http_probe_data_from_graph
 from recon.partial_recon_modules.user_inputs import _create_user_subdomains_in_graph
 from recon.helpers import build_target_urls, extract_targets_from_recon
@@ -256,7 +256,10 @@ def run_kiterunner(config: dict) -> None:
     include_graph = config.get("include_graph_targets", True)
     if include_graph:
         print(f"[*][Partial Recon] Querying graph for targets (BaseURLs)...")
-        recon_data = _build_http_probe_data_from_graph(domain, user_id, project_id)
+        recon_data = _build_http_probe_data_from_graph(
+            domain, user_id, project_id,
+            include_root_domain=_should_include_root_domain(settings),
+        )
     else:
         print(f"[*][Partial Recon] Skipping graph targets (user opted out)")
         recon_data = {

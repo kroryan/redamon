@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
+## [4.9.1] - 2026-05-10
+
+### Fixed
+
+- **Partial-recon Katana never crawled** ([recon/helpers/resource_enum/katana_helpers.py](recon/helpers/resource_enum/katana_helpers.py)) — Docker-in-Docker path mismatch: targets file written to recon container's `/tmp/`, but spawned katana's `-v /tmp:/tmp` resolved against the host daemon's `/tmp` (where the file didn't exist), so katana exited in ~1.5s with 0 URLs. Switched to `/tmp/redamon/` (already host-shared, used by every other tool) and surface stderr on early exit.
+- **Partial-recon ignored "Include Root Domain" scope** ([recon/partial_recon_modules/graph_builders.py](recon/partial_recon_modules/graph_builders.py), [recon/helpers/target_helpers.py](recon/helpers/target_helpers.py)) — 9 tools (Katana, Hakrawler, FFuf, Kiterunner, Naabu, Masscan, Nmap, Httpx, Nuclei + security checks) wrote apex BaseURL/Endpoint nodes regardless of the project's `subdomainList` toggle. Added `_should_include_root_domain(settings)` mirroring `recon/main.py:parse_target`; graph builders gate the apex `Domain → IP` query, filter apex BaseURLs from Source 2, and stamp `metadata.include_root_domain` so `extract_targets_from_recon` excludes the apex hostname when scope says no. Same scope contract as the full pipeline.
+- **Resource-enum orphan-linker** ([graph_db/mixins/recon/resource_mixin.py](graph_db/mixins/recon/resource_mixin.py)) — replaced substring `bu.url CONTAINS sub.name` (cross-Subdomain mis-link trap) with exact host extraction and added an apex/Domain pass so bare-domain BaseURLs link to the Domain node instead of being orphaned.
+- **`execute_playwright` async-API regression loop** ([agentic/prompts/tool_registry.py](agentic/prompts/tool_registry.py), [mcp/servers/playwright_server.py](mcp/servers/playwright_server.py)) — agent kept writing `await` / `asyncio.run()` inside scripts (sync-only wrapper), burning 6+ iterations on `SyntaxError` / `RuntimeError`. Added explicit "Sync API only" rule to the tool description and a pre-flight guard that returns an actionable error naming the forbidden token.
+
+
+---
+
+
 ## [4.9.0] - 2026-05-09
 
 ### Added — MCP Tool Plugins (Global Settings → MCP Tool Plugins tab)

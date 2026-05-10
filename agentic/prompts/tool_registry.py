@@ -391,12 +391,16 @@ TOOL_REGISTRY = {
         "args_format": '"url": "http://target:port/path", "selector": "CSS selector", "format": "text|html", "script": "Playwright Python code"',
         "description": (
             '**execute_playwright** (Browser automation -- Playwright)\n'
+            '   - **CRITICAL: Sync API only.** Your script runs inside `with sync_playwright() as p:`.\n'
+            '     Do NOT use `await`, `async def`, `import asyncio`, or `asyncio.run()` -- they will raise SyntaxError/RuntimeError.\n'
+            '     For delays use `page.wait_for_timeout(ms)` (NOT `asyncio.sleep`).\n'
             '   - **Content mode** (url): renders page with real browser, extracts text/HTML\n'
             '     Unlike curl, this executes JavaScript -- perfect for SPAs and dynamic pages\n'
             '     Optional: selector="form" to target elements, format="html" for innerHTML\n'
             '   - **Script mode** (script): run multi-step Playwright Python code\n'
             '     Pre-initialized `browser`, `context`, `page` variables. Use print() for output.\n'
-            '     Example: page.goto("url"); page.fill("#user","admin"); print(page.title())'
+            '     Example: page.goto("url"); page.fill("#user","admin"); page.click("button[type=submit]"); '
+            'page.wait_for_load_state("networkidle"); print(page.url)'
         ),
     },
     "execute_hydra": {

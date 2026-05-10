@@ -15,33 +15,40 @@ from urllib.parse import urlparse
 def extract_targets_from_recon(recon_data: dict) -> Tuple[Set[str], Set[str], Dict[str, List[str]]]:
     """
     Extract all unique IPs, hostnames, and build IP-to-hostname mapping.
-    
-    Args:
-        recon_data: The domain reconnaissance JSON data
-        
+
+    Honors recon_data["metadata"]["include_root_domain"]: when explicitly
+    False, the apex/root domain is NOT added to the hostname set, even when
+    dns.domain is populated. The full pipeline sets this flag in main.py
+    (parse_target + GROUP-2/3 branches); partial-recon graph builders set
+    it from project settings. Default (flag missing) is True, preserving
+    legacy behavior where the apex is always included.
+
     Returns:
         Tuple of (unique_ips, unique_hostnames, ip_to_hostnames_mapping)
     """
     ips = set()
     hostnames = set()
     ip_to_hostnames = {}
-    
+
     dns_data = recon_data.get("dns", {})
     if not dns_data:
         return ips, hostnames, ip_to_hostnames
-    
+
+    metadata = recon_data.get("metadata") or {}
+    include_root_domain = metadata.get("include_root_domain", True)
+
     # Extract from root domain
-    domain = recon_data.get("domain", "") or recon_data.get("metadata", {}).get("target", "")
+    domain = recon_data.get("domain", "") or metadata.get("target", "")
     domain_dns = dns_data.get("domain", {})
     if domain_dns:
         domain_ips = domain_dns.get("ips", {})
         ipv4_list = domain_ips.get("ipv4", [])
         ipv6_list = domain_ips.get("ipv6", [])
-        
+
         ips.update(ipv4_list)
         ips.update(ipv6_list)
-        
-        if domain:
+
+        if domain and include_root_domain:
             hostnames.add(domain)
             for ip in ipv4_list + ipv6_list:
                 if ip:
