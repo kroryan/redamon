@@ -44,7 +44,7 @@ from prompts import (
     build_tool_name_enum,
     build_tool_args_section,
 )
-from prompts.base import build_fireteam_prompt_fragments
+from prompts.base import build_fireteam_prompt_fragments, CACHE_PREFIX_END_MARKER
 from utils import get_session_config_prompt
 from tools import set_tenant_context, set_phase_context, set_graph_view_context
 
@@ -445,9 +445,34 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
         logger.info(f"PROMPT[{i}:{i+len(chunk)}]:\n{chunk}")
     logger.info(f"{'#'*80}\n")
 
+    # Anthropic prompt caching: when the LLM is ChatAnthropic, split the
+    # assembled system prompt at CACHE_PREFIX_END_MARKER and emit two content
+    # blocks. The prefix block (persona + phase definitions + tool registry +
+    # attack skill) is marked cache_control={"type": "ephemeral"} so Anthropic
+    # caches it once and bills subsequent reads at ~10% of base input cost.
+    # The dynamic suffix (current state, chain context, etc.) is uncached.
+    # langchain-anthropic>=0.3 auto-attaches the prompt-caching beta header
+    # when it sees cache_control content blocks; no extra_headers needed.
+    # Gated on ANTHROPIC_PROMPT_CACHING_ENABLED so operators can disable.
+    _caching_enabled = (
+        get_setting('ANTHROPIC_PROMPT_CACHING_ENABLED', True)
+        and type(llm).__name__ == 'ChatAnthropic'
+        and CACHE_PREFIX_END_MARKER in system_prompt
+    )
+    if _caching_enabled:
+        _prefix, _, _suffix = system_prompt.partition(CACHE_PREFIX_END_MARKER)
+        system_message_content = [
+            {"type": "text", "text": _prefix.rstrip(), "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": _suffix.lstrip()},
+        ]
+    else:
+        # Caching disabled, non-Anthropic LLM, or marker absent — strip the
+        # marker so the LLM never sees the sentinel string.
+        system_message_content = system_prompt.replace(CACHE_PREFIX_END_MARKER, "")
+
     # Get LLM decision with retry on parse failures
     messages = [
-        SystemMessage(content=system_prompt),
+        SystemMessage(content=system_message_content),
         HumanMessage(content="Based on the current state, what is your next action? Output EXACTLY ONE valid JSON object and nothing else. Do NOT simulate tool execution - you will receive actual tool output after submitting your decision. Do NOT output multiple JSON objects or continue the conversation - just ONE decision JSON.")
     ]
 

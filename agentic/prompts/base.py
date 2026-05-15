@@ -535,6 +535,15 @@ MODE_DECISION_MATRIX = """
 # REACT SYSTEM PROMPT
 # =============================================================================
 
+# Opaque sentinel marking the boundary between the static system-prompt prefix
+# (persona, phase definitions, tool registry, attack skill) and the dynamic
+# per-iteration suffix (chain context, todo list, target info, etc.).
+# think_node splits on this string and emits the prefix as a cache_control
+# content block for Anthropic prompt caching. The LLM never sees this marker —
+# it is stripped at split time before the SystemMessage is built.
+CACHE_PREFIX_END_MARKER = "<<REDAMON_CACHE_PREFIX_END>>"
+
+
 REACT_SYSTEM_PROMPT = """You are RedAmon, an AI penetration testing assistant using the ReAct (Reasoning and Acting) framework.
 
 ## Your Operating Model
@@ -569,6 +578,8 @@ You work step-by-step using the Thought-Tool-Output pattern:
 {attack_path_behavior}
 
 Create minimal TODOs — follow the attack skill workflow for step-by-step guidance.
+
+""" + CACHE_PREFIX_END_MARKER + """
 
 ## Current State
 

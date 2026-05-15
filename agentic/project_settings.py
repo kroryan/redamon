@@ -44,6 +44,12 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'INFORMATIONAL_SYSTEM_PROMPT': '',
     'EXPL_SYSTEM_PROMPT': '',
     'POST_EXPL_SYSTEM_PROMPT': '',
+    # Anthropic prompt caching for the root think_node's system prompt.
+    # When True, the static prefix (persona + tool registry + attack skill)
+    # is marked cache_control={"type": "ephemeral"} so Anthropic caches it
+    # once per session and bills subsequent reads at ~10% of base input cost.
+    # Has no effect on non-Anthropic providers (gated by isinstance check).
+    'ANTHROPIC_PROMPT_CACHING_ENABLED': True,
 
     # Stealth Mode
     'STEALTH_MODE': False,
