@@ -389,7 +389,7 @@ def apply_project_settings(orchestrator, project_id: str) -> None:
                 custom_llm_config=custom_config,
             )
         except (ValueError, Exception) as e:
-            logger.error(f"LLM setup failed for {new_model}: {e}")
+            logger.error(f"LLM setup failed for {new_model}: {type(e).__name__}: {e}")
             orchestrator.llm = None
             return
 

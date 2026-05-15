@@ -270,7 +270,7 @@ async def fetch_deepseek_models(api_key: str = "") -> list[dict]:
                 description="DeepSeek",
             ))
     except Exception as e:
-        logger.warning(f"DeepSeek /v1/models unreachable, using fallback list: {e}")
+        logger.warning(f"DeepSeek /v1/models unreachable, using fallback list: {type(e).__name__}: {e}")
 
     if not discovered:
         for mid, mname in _DEEPSEEK_FALLBACK_MODELS:
@@ -307,7 +307,7 @@ async def _fetch_openai_compat_models(
             resp.raise_for_status()
         data = resp.json().get("data", [])
     except Exception as e:
-        logger.warning(f"{id_prefix} /models unreachable: {e}")
+        logger.warning(f"{id_prefix} /models unreachable: {type(e).__name__}: {e}")
         return []
 
     models = []
@@ -539,7 +539,7 @@ async def fetch_all_models(
         gathered_db = await asyncio.gather(*coro_tasks.values(), return_exceptions=True)
         for prov_name, result in zip(coro_tasks.keys(), gathered_db):
             if isinstance(result, Exception):
-                logger.warning(f"Failed to fetch models from {prov_name}: {result}")
+                logger.warning(f"Failed to fetch models from {prov_name}: {type(result).__name__}: {result}")
                 results_db[prov_name] = []
             else:
                 results_db[prov_name] = result

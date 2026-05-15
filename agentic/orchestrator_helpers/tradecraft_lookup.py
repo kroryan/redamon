@@ -559,7 +559,7 @@ async def fetch_tier1(
                 raw_bytes=raw_for_detection,
             )
     except httpx.HTTPError as e:
-        logger.warning(f"[tradecraft] tier1 http error url={url} err={e}")
+        logger.warning(f"[tradecraft] tier1 http error url={url} err={type(e).__name__}: {e}")
         return FetchResult(text="", content_type="", status=0, tier=1)
 
 
@@ -576,7 +576,7 @@ async def fetch_tier2(url: str, mcp_manager) -> FetchResult:
                     playwright = t
                     break
         except Exception as e:
-            logger.warning(f"[tradecraft] tier2 cannot get mcp tools: {e}")
+            logger.warning(f"[tradecraft] tier2 cannot get mcp tools: {type(e).__name__}: {e}")
             return FetchResult(text="", content_type="", status=0, tier=2)
         if playwright is None:
             logger.warning("[tradecraft] tier2 execute_playwright not available")
@@ -595,7 +595,7 @@ async def fetch_tier2(url: str, mcp_manager) -> FetchResult:
         text = _html_to_markdown(html)
         return FetchResult(text=text, content_type="text/html", status=200, tier=2, raw_bytes=html.encode("utf-8", "ignore"))
     except Exception as e:
-        logger.warning(f"[tradecraft] tier2 error url={url} err={e}")
+        logger.warning(f"[tradecraft] tier2 error url={url} err={type(e).__name__}: {e}")
         return FetchResult(text="", content_type="", status=0, tier=2)
 
 
@@ -872,7 +872,7 @@ async def _build_sitemap_github_repo(base_url: str, github_token: str = "") -> D
                 )
             return result
     except Exception as e:
-        logger.warning(f"[tradecraft] github tree exception owner={owner} repo={repo} err={e}")
+        logger.warning(f"[tradecraft] github tree exception owner={owner} repo={repo} err={type(e).__name__}: {e}")
         return {
             "tree": [], "owner": owner, "repo": repo, "branch": branch,
             "_error": f"github tree fetch exception: {e}",
@@ -1091,7 +1091,7 @@ async def _pick_section(
                 logger.info(f"[tradecraft] section_picker llm_call resource={resource_name} candidates={len(candidates)} picked={idx+1}")
                 return candidates[idx][1]
     except Exception as e:
-        logger.warning(f"[tradecraft] section_picker llm error: {e}, falling back to top-1 lexical")
+        logger.warning(f"[tradecraft] section_picker llm error: {type(e).__name__}: {e}, falling back to top-1 lexical")
     return top[0][1]
 
 
@@ -1345,7 +1345,7 @@ async def verify_resource(
                 if builder_err:
                     last_error = (last_error + " | " if last_error else "") + builder_err
             except Exception as e:
-                logger.error(f"[tradecraft] verify sitemap error url={url} type={rtype} err={e}")
+                logger.error(f"[tradecraft] verify sitemap error url={url} type={rtype} err={type(e).__name__}: {e}")
                 last_error = (last_error + " | " if last_error else "") + f"sitemap build error: {e}"
 
         entries = _sitemap_entries(sitemap)
@@ -1407,7 +1407,7 @@ async def verify_resource(
                 ])
                 summary = (getattr(resp, "content", "") or "").strip()
             except Exception as e:
-                logger.warning(f"[tradecraft] verify summary error url={url} err={e}")
+                logger.warning(f"[tradecraft] verify summary error url={url} err={type(e).__name__}: {e}")
                 last_error = (last_error + " | " if last_error else "") + f"summary error: {e}"
         logger.info(f"[tradecraft] verify summary_done url={url} chars={len(summary)}")
 
@@ -1487,7 +1487,7 @@ class TradecraftLookupManager:
                     github_token_override=str(r.get("githubTokenOverride", "") or ""),
                 ))
             except Exception as e:
-                logger.warning(f"[tradecraft] bad resource row skipped: {e}")
+                logger.warning(f"[tradecraft] bad resource row skipped: {type(e).__name__}: {e}")
         self._resources = out
         self._by_slug = {r.slug: r for r in out if r.slug}
         logger.info(f"[tradecraft] manager initialized resources={len(out)}")
