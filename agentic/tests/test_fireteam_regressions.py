@@ -772,5 +772,83 @@ class WaveTimeoutPreservesPartialStateRegression(unittest.IsolatedAsyncioTestCas
         self.assertEqual(result.get("findings") or [], [])
 
 
+# =============================================================================
+# BUG: Single try/except wrapped the whole findings-conversion loop at debug
+# level, dropping the entire batch on one bad item and hiding the failure.
+# =============================================================================
+#
+# Fix moved the try/except inside the loop (per-item isolation) and raised the
+# log level to warning so schema drift / malformed LLM emissions surface on
+# the default console handler (CONSOLE_LOG_LEVEL=INFO).
+
+
+class FindingConversionPerItemExceptionRegression(unittest.TestCase):
+    """Locks the fix: a malformed finding skips itself, not the whole batch,
+    and emits a warning-level log identifying the failure."""
+
+    def test_one_bad_finding_doesnt_drop_the_batch(self):
+        from orchestrator_helpers.nodes.fireteam_deploy_node import (
+            _result_from_final_state,
+        )
+
+        final_state = {
+            "chain_findings_memory": [
+                {
+                    "finding_type": "service_identified",
+                    "severity": "info",
+                    "title": "good 1",
+                    "evidence": "nginx 1.18 detected",
+                    "confidence": 80,
+                    "step_iteration": 1,
+                },
+                {
+                    # Pydantic v2 ValidationError: "high" can't coerce to int.
+                    "finding_type": "vulnerability_confirmed",
+                    "severity": "high",
+                    "title": "bad item — confidence is a string",
+                    "evidence": "unparseable confidence",
+                    "confidence": "high",
+                    "step_iteration": 1,
+                },
+                {
+                    "finding_type": "configuration_found",
+                    "severity": "low",
+                    "title": "good 2",
+                    "evidence": "CORS *",
+                    "confidence": 90,
+                    "step_iteration": 2,
+                },
+            ],
+            "execution_trace": [],
+            "target_info": {},
+            "parent_target_info": {},
+        }
+        spec = {"name": "Scout", "task": "t", "tools": []}
+
+        with self.assertLogs(
+            "orchestrator_helpers.nodes.fireteam_deploy_node", level="WARNING",
+        ) as cm:
+            result = _result_from_final_state(final_state, spec, "m-0", 1.0)
+
+        # Both valid findings survive — pre-fix the whole batch would be [].
+        self.assertEqual(
+            len(result["findings"]), 2,
+            f"expected 2 valid findings to survive (good 1, good 2); got "
+            f"{len(result['findings'])}: {[f.get('title') for f in result['findings']]}",
+        )
+        titles = [f["title"] for f in result["findings"]]
+        self.assertIn("good 1", titles)
+        self.assertIn("good 2", titles)
+        self.assertNotIn("bad item — confidence is a string", titles)
+
+        # A WARNING was emitted that mentions the failure. Either the offending
+        # dict's title or the Pydantic field name ('confidence') is enough.
+        joined = "\n".join(cm.output)
+        self.assertTrue(
+            "bad item" in joined or "confidence" in joined,
+            f"warning log did not surface the bad item: {joined!r}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -24,7 +24,7 @@ from uuid import uuid4
 import httpx
 from langchain_core.messages import SystemMessage
 
-from state import AgentState, FireteamMemberResult
+from state import AgentState, FireteamMemberResult, ChainFindingExtract
 from orchestrator_helpers.config import get_identifiers
 from project_settings import get_setting, TOOL_MUTEX_GROUPS
 from tools import set_tenant_context, set_phase_context, set_graph_view_context
@@ -297,22 +297,30 @@ def _result_from_final_state(final_state: dict, spec: dict, member_id: str, wall
     # report pipeline joins there directly — this field is a best-effort
     # denormalization for the FireteamMember.resultBlob dump.
     findings = []
-    try:
-        from state import ChainFindingExtract
-        for f in (final_state.get("chain_findings_memory") or []):
-            if isinstance(f, dict):
-                findings.append(ChainFindingExtract(
-                    finding_type=f.get("finding_type", "custom"),
-                    severity=f.get("severity", "info"),
-                    title=f.get("title", ""),
-                    evidence=f.get("evidence", ""),
-                    related_cves=f.get("related_cves") or [],
-                    related_ips=f.get("related_ips") or [],
-                    confidence=f.get("confidence", 80),
-                    step_iteration=int(f.get("step_iteration") or 0),
-                ))
-    except Exception as e:
-        logger.debug("findings conversion skipped: %s", e)
+    for f in (final_state.get("chain_findings_memory") or []):
+        if not isinstance(f, dict):
+            continue
+        try:
+            findings.append(ChainFindingExtract(
+                finding_type=f.get("finding_type", "custom"),
+                severity=f.get("severity", "info"),
+                title=f.get("title", ""),
+                evidence=f.get("evidence", ""),
+                related_cves=f.get("related_cves") or [],
+                related_ips=f.get("related_ips") or [],
+                confidence=f.get("confidence", 80),
+                step_iteration=int(f.get("step_iteration") or 0),
+            ))
+        except Exception as e:
+            # Per-item try/except: one malformed dict no longer drops the
+            # rest of the batch. Warning level so failures are visible on
+            # the default console handler (CONSOLE_LOG_LEVEL is INFO).
+            # Offending dict is truncated to keep logs bounded when evidence
+            # fields carry large blobs.
+            logger.warning(
+                "findings conversion skipped one item: %s; offending=%s",
+                e, str(f)[:300],
+            )
 
     return FireteamMemberResult(
         member_id=member_id,
