@@ -64,6 +64,7 @@ except Exception:
     PdfReader = None  # populated after requirements bump
 
 from logging_config import get_logger
+from orchestrator_helpers.json_utils import normalize_content
 
 logger = get_logger(__name__)
 
@@ -1083,7 +1084,7 @@ async def _pick_section(
     try:
         async with semaphore:
             resp = await section_picker_llm.ainvoke(prompt)
-        out = getattr(resp, "content", str(resp)).strip()
+        out = normalize_content(getattr(resp, "content", str(resp))).strip()
         m = re.search(r"\d+", out)
         if m:
             idx = int(m.group(0)) - 1
@@ -1405,7 +1406,7 @@ async def verify_resource(
                     {"role": "system", "content": _SUMMARY_PROMPT},
                     {"role": "user", "content": user_msg},
                 ])
-                summary = (getattr(resp, "content", "") or "").strip()
+                summary = normalize_content(getattr(resp, "content", "") or "").strip()
             except Exception as e:
                 logger.warning(f"[tradecraft] verify summary error url={url} err={type(e).__name__}: {e}")
                 last_error = (last_error + " | " if last_error else "") + f"summary error: {e}"

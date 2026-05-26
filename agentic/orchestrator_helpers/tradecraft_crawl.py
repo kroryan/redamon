@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from logging_config import get_logger
+from orchestrator_helpers.json_utils import normalize_content
 
 logger = get_logger(__name__)
 
@@ -301,7 +302,7 @@ async def _llm_decide(
     try:
         state.llm_calls += 1
         resp = await llm.ainvoke(prompt)
-        content = (getattr(resp, "content", "") or "").strip()
+        content = normalize_content(getattr(resp, "content", "") or "").strip()
         # Strip code fences
         m = re.search(r"\{.*\}", content, re.DOTALL)
         if not m:

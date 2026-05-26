@@ -1158,6 +1158,12 @@ model UserTradecraftResource {
   crawlStoppedBecause  String   @default("") @map("crawl_stopped_because")
   crawlStats           Json     @default("{}") @map("crawl_stats")
 
+  // LLM model used for crawl decisions + summary at verify time. Empty string
+  // means "fall back to the project's agent model" (same convention as
+  // Project.cypherfixLlmModel). Lets the user pick a cheaper/faster model
+  // for tradecraft ingestion without changing the chat model.
+  llmModel             String   @default("") @map("llm_model")
+
   // Auth + caching tunables
   githubTokenOverride  String   @default("") @map("github_token_override")
   cacheTtlSec          Int      @default(0) @map("cache_ttl_sec")

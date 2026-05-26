@@ -559,7 +559,7 @@ async def llm_ffuf_extensions(body: FfufExtensionsRequest):
         logger.error(f"ffuf-extensions: LLM call failed: {e}")
         return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
 
-    raw_text = (getattr(response, 'content', None) or '').strip()
+    raw_text = normalize_content(getattr(response, 'content', None)).strip()
     # Strip ``` fences if the model wrapped the JSON
     if raw_text.startswith('```'):
         raw_text = raw_text.strip('`')
@@ -659,7 +659,7 @@ async def llm_nuclei_tags(body: NucleiTagsRequest):
         logger.error(f"nuclei-tags: LLM call failed: {e}")
         return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
 
-    raw_text = (getattr(response, 'content', None) or '').strip()
+    raw_text = normalize_content(getattr(response, 'content', None)).strip()
     if raw_text.startswith('```'):
         raw_text = raw_text.strip('`')
         if raw_text.startswith('json'):
@@ -768,7 +768,7 @@ async def llm_waf_classify(body: WafClassifyRequest):
         logger.error(f"waf-classify: LLM call failed: {e}")
         return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
 
-    raw_text = (getattr(response, 'content', None) or '').strip()
+    raw_text = normalize_content(getattr(response, 'content', None)).strip()
     if raw_text.startswith('```'):
         raw_text = raw_text.strip('`')
         if raw_text.startswith('json'):
@@ -892,7 +892,7 @@ async def llm_nuclei_fp_filter(body: NucleiFpFilterRequest):
         logger.error(f"nuclei-fp-filter: LLM call failed: {e}")
         return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
 
-    raw_text = (getattr(response, 'content', None) or '').strip()
+    raw_text = normalize_content(getattr(response, 'content', None)).strip()
     if raw_text.startswith('```'):
         raw_text = raw_text.strip('`')
         if raw_text.startswith('json'):
@@ -1025,7 +1025,7 @@ async def llm_takeover_classify(body: TakeoverClassifyRequest):
         logger.error(f"takeover-classify: LLM call failed: {e}")
         return JSONResponse(content={"error": f"LLM call failed: {e}"}, status_code=502)
 
-    raw_text = (getattr(response, 'content', None) or '').strip()
+    raw_text = normalize_content(getattr(response, 'content', None)).strip()
     if raw_text.startswith('```'):
         raw_text = raw_text.strip('`')
         if raw_text.startswith('json'):
@@ -1152,6 +1152,13 @@ class TradecraftVerifyRequest(BaseModel):
     user_id: Optional[str] = None      # used to load the user's LLM provider keys
     github_token: Optional[str] = None
     force: bool = False
+    # Per-resource model override. When set, the verify endpoint builds a
+    # provider-agnostic LLM for THIS model (resolving the user's provider
+    # keys) instead of reusing orchestrator.llm. Decouples tradecraft
+    # ingestion from the agent's current chat model and from project-load
+    # order (fixes the "agent reverted to default Anthropic after restart"
+    # 401 path).
+    model: Optional[str] = None
 
 
 _CUSTOM_PROVIDER_TYPES = ("openai_compatible", "bedrock_custom", "ollama_local")
@@ -1275,17 +1282,27 @@ async def tradecraft_verify(body: TradecraftVerifyRequest):
             "crawl_stats": {},
             "last_error": err,
         }
-    # Prefer the agent's loaded LLM (a project session is active);
-    # otherwise build one on demand from the user's saved providers.
-    llm = orchestrator.llm
-    if llm is None:
-        try:
+    # Resolve the LLM used for crawl decisions + summary:
+    #   1. If the request specifies a per-resource model, build a provider-
+    #      agnostic LLM for THAT model from the user's saved providers.
+    #      (Same path the 5 recon AI classifiers use.) This is the normal
+    #      path — the webapp always sends a model now that the field is
+    #      required at create/edit time.
+    #   2. Otherwise (back-compat for direct API callers and old rows
+    #      written before this column existed), prefer the orchestrator's
+    #      loaded LLM, then fall back to _build_llm_for_user.
+    try:
+        if body.model:
+            llm = _build_llm_with_model_for_user(body.model, body.user_id)
+        elif orchestrator.llm is not None:
+            llm = orchestrator.llm
+        else:
             llm = _build_llm_for_user(body.user_id)
-        except Exception as e:
-            logger.error(f"tradecraft verify: cannot set up LLM: {e}")
-            return JSONResponse(
-                {"error": f"LLM not configured: {e}"}, status_code=503
-            )
+    except Exception as e:
+        logger.error(f"tradecraft verify: cannot set up LLM: {e}")
+        return JSONResponse(
+            {"error": f"LLM not configured: {e}"}, status_code=503
+        )
     bounds = {
         "max_pages": DEFAULT_AGENT_SETTINGS.get("TRADECRAFT_CRAWL_MAX_PAGES", 30),
         "max_llm_calls": DEFAULT_AGENT_SETTINGS.get("TRADECRAFT_CRAWL_MAX_LLM_CALLS", 20),
