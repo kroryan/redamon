@@ -91,6 +91,50 @@ class TestMainErrorPaths(unittest.TestCase):
         self.assertEqual(phases, [1, 2, 3, 4])
 
 
+class TestRunToolDispatch(unittest.TestCase):
+    def test_skeleton_returns_dummies(self):
+        targets = [tl.Target(baseurl="http://h", path="/c", ai_interface_type="llm-chat")]
+        findings = main.run_tool(_cfg(tool="skeleton"), targets)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].source, "skeleton")
+
+    def test_garak_dispatch_isolates_per_target_failures(self):
+        from normalizer import Finding
+        t_bad = tl.Target(baseurl="http://a", path="/c")
+        t_ok = tl.Target(baseurl="http://b", path="/c")
+
+        def fake_run(target, *a, **k):
+            if target.baseurl == "http://a":
+                raise RuntimeError("garak boom")
+            return [Finding(source="garak", chip="jailbreak", name="n",
+                            baseurl="http://b", path="/c", ai_owasp_llm_id="LLM01",
+                            ai_payload_class="garak-dan")]
+
+        with patch("adapters.garak.run", side_effect=fake_run):
+            findings = main.run_tool(_cfg(tool="garak"), [t_bad, t_ok])
+        # The failing target is isolated; the healthy one still yields its finding.
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].baseurl, "http://b")
+
+    def test_garak_passes_probes_and_judge_through(self):
+        from normalizer import Finding
+        captured = {}
+
+        def fake_run(target, bounds, output_dir, run_id, **k):
+            captured.update(k)
+            return []
+
+        cfg = _cfg(tool="garak")
+        cfg.probes = ["dan.Dan_11_0"]
+        cfg.judge_base_url = "http://localhost:11434"
+        cfg.target_model = "qwen2.5:0.5b"
+        with patch("adapters.garak.run", side_effect=fake_run):
+            main.run_tool(cfg, [tl.Target(baseurl="http://b", path="/c")])
+        self.assertEqual(captured["probes"], ["dan.Dan_11_0"])
+        self.assertEqual(captured["judge_base_url"], "http://localhost:11434")
+        self.assertEqual(captured["target_model"], "qwen2.5:0.5b")
+
+
 def _reachable():
     try:
         d = graph.make_driver()

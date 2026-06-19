@@ -140,6 +140,24 @@ class TestRestConfig(unittest.TestCase):
         self.assertIn("rest", cfg)
         self.assertIn("RestGenerator", cfg["rest"])
 
+    def test_model_from_list(self):
+        t = Target(baseurl="http://h", path="/v1/chat/completions", ai_model_ids=["qwen2.5:7b"])
+        c = build_rest_config(t)["rest"]["RestGenerator"]
+        self.assertEqual(c["req_template_json_object"]["model"], "qwen2.5:7b")
+
+    def test_model_id_as_bare_string_not_sliced(self):
+        # Regression: a string ai_model_ids must not become its first character.
+        t = Target(baseurl="http://h", path="/v1/chat/completions")
+        t.ai_model_ids = "qwen"  # not a list
+        c = build_rest_config(t)["rest"]["RestGenerator"]
+        self.assertEqual(c["req_template_json_object"]["model"], "qwen")
+
+    def test_model_falls_back_to_family_guess(self):
+        t = Target(baseurl="http://h", path="/v1/chat/completions",
+                   ai_model_ids=None, ai_model_family_guess="llama")
+        c = build_rest_config(t)["rest"]["RestGenerator"]
+        self.assertEqual(c["req_template_json_object"]["model"], "llama")
+
 
 # --------------------------------------------------------------------------- #
 # OWASP map

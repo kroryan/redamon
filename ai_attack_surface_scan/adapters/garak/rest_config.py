@@ -62,8 +62,11 @@ def build_rest_config(target, model: str | None = None,
     """
     family = _family_from_target(target)
     if not model:
-        ids = getattr(target, "ai_model_ids", None) or []
-        model = (ids[0] if ids else None) or getattr(target, "ai_model_family_guess", None) or "default"
+        ids = getattr(target, "ai_model_ids", None)
+        # recon stores a list; guard against a bare string (ids[0] would slice a
+        # character) or any non-list value.
+        first_id = ids[0] if isinstance(ids, list) and ids else (ids if isinstance(ids, str) else None)
+        model = first_id or getattr(target, "ai_model_family_guess", None) or "default"
 
     body, field = _body_and_field(family, model)
 
