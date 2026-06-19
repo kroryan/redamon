@@ -22,7 +22,9 @@ class TestCommandConstruction(unittest.TestCase):
                 generations=3, seed=7, report_prefix="/out/garak_run",
                 judge_base_url="http://localhost:11434", api_key="secret")
         cmd = mrun.call_args.args[0]
-        self.assertEqual(cmd[:3], ["python", "-m", "garak"])
+        # cmd[0] is the garak venv interpreter (GARAK_PYTHON), "python" in dev.
+        self.assertEqual(cmd[0], runner.GARAK_PYTHON)
+        self.assertEqual(cmd[1:3], ["-m", "garak"])
         self.assertEqual(cmd[cmd.index("--model_type") + 1], "rest")
         self.assertEqual(cmd[cmd.index("--generator_option_file") + 1], "/cfg.json")
         self.assertEqual(cmd[cmd.index("--probes") + 1], "dan,encoding")

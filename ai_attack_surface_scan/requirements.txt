@@ -1,10 +1,6 @@
-# AI Attack Surface scan dependencies.
-# The Neo4j driver for the spine + the attack tools baked into the one image
-# (§1.2). Tools are pinned for reproducibility (the parser/TOOL_API.md is
-# written against the pinned version).
+# AI Attack Surface scan — BASE (shared spine) dependencies only.
+# The attack tools are installed into per-tool virtualenvs (see the Dockerfile),
+# because their dependencies conflict and cannot share one environment:
+#   garak 0.15.1 needs datasets<4.0 ; pyrit 0.14.0 needs datasets>=4.8.0
+#   (and promptfoo is a Node.js tool). The spine talks to Neo4j only.
 neo4j>=5.0.0
-
-# garak (Apache-2.0) — broad single-shot LLM vulnerability scanner (Step 4).
-# Pinned: adapters/garak/TOOL_API.md + the report.jsonl parser target this exact
-# version. Pulls a large dep tree (torch/transformers) for local detectors.
-garak==0.15.1

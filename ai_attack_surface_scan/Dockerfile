@@ -1,10 +1,11 @@
 # =============================================================================
-# RedAmon AI Attack Surface Scanner - Python Container (Step 2: skeleton)
+# RedAmon AI Attack Surface Scanner — Python Container
 # =============================================================================
-# Reads the AI surface recon annotated into the graph, runs a fixed catalog of
-# attack tools against selected nodes, and writes normalized Vulnerability
-# findings back. Step 2 ships the shared spine only (target loader, safety/bounds,
-# normalizer) with a dummy finding. Per-tool adapters land in later steps.
+# One image, PER-TOOL VIRTUALENVS. The attack tools' dependencies conflict and
+# cannot share one environment (garak needs datasets<4.0; pyrit needs >=4.8.0;
+# promptfoo is Node.js). So the shared spine (neo4j driver + main/target_loader/
+# safety/normalizer) runs in the BASE interpreter, and each tool gets its own
+# venv. Each adapter invokes its tool via that venv's interpreter as a subprocess.
 # =============================================================================
 
 FROM python:3.12-slim
@@ -14,17 +15,34 @@ LABEL description="AI Attack Surface deterministic offensive scanner for RedAmon
 
 WORKDIR /app
 
-# Spine deps (just the Neo4j driver for now).
-COPY ai_attack_surface_scan/requirements.txt /tmp/ai_attack_requirements.txt
-RUN pip install --no-cache-dir -r /tmp/ai_attack_requirements.txt
+# Build tools some tool wheels need; removed after the venvs are built.
+RUN apt-get update && apt-get install -y --no-install-recommends git build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy the scanner. graph_db is NOT baked in: the spine talks to Neo4j via the
-# bare driver, and the orchestrator volume-mounts graph_db at spawn if a later
-# adapter needs the mixin helpers.
+# --- Base (shared spine): just the Neo4j driver ---
+COPY ai_attack_surface_scan/requirements.txt /tmp/base-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/base-requirements.txt
+
+# --- Per-tool venvs (isolated, conflicting deps) ---
+COPY ai_attack_surface_scan/adapters/garak/requirements.txt /tmp/garak-requirements.txt
+RUN python -m venv /opt/venv-garak \
+    && /opt/venv-garak/bin/pip install --no-cache-dir -U pip \
+    && /opt/venv-garak/bin/pip install --no-cache-dir -r /tmp/garak-requirements.txt
+
+COPY ai_attack_surface_scan/adapters/pyrit/requirements.txt /tmp/pyrit-requirements.txt
+RUN python -m venv /opt/venv-pyrit \
+    && /opt/venv-pyrit/bin/pip install --no-cache-dir -U pip \
+    && /opt/venv-pyrit/bin/pip install --no-cache-dir -r /tmp/pyrit-requirements.txt
+
+# Copy the scanner (spine + adapters). The runner scripts are invoked by their
+# tool's venv; the spine runs in the base interpreter.
 COPY ai_attack_surface_scan/ ./ai_attack_surface_scan/
 
 RUN mkdir -p ai_attack_surface_scan/output
 
+# Per-tool interpreter paths (adapters default to these; overridable for dev).
+ENV GARAK_PYTHON=/opt/venv-garak/bin/python
+ENV PYRIT_PYTHON=/opt/venv-pyrit/bin/python
 ENV PYTHONPATH=/app/ai_attack_surface_scan
 ENV PYTHONUNBUFFERED=1
 

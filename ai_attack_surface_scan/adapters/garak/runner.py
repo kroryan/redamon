@@ -9,6 +9,10 @@ from pathlib import Path
 
 logger = logging.getLogger("ai-attack-surface")
 
+# garak lives in its own venv (its datasets pin conflicts with pyrit). Invoke it
+# via that interpreter; fall back to "python" for local dev where it's on PATH.
+GARAK_PYTHON = os.environ.get("GARAK_PYTHON", "python")
+
 
 def run_garak_scan(
     config_path: str,
@@ -23,7 +27,7 @@ def run_garak_scan(
     """Run garak with the REST generator. Returns (report_path|None, returncode,
     tail_of_output). Never raises on a non-zero garak exit — the caller decides."""
     cmd = [
-        "python", "-m", "garak",
+        GARAK_PYTHON, "-m", "garak",
         "--model_type", "rest",
         "--generator_option_file", str(config_path),
         "--probes", ",".join(probes),
