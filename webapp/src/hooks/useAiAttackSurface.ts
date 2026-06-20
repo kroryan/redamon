@@ -24,11 +24,15 @@ export interface LaunchTarget {
 export interface LaunchPayload {
   tool: string
   targets: LaunchTarget[]
-  bounds: { trials?: number; asr_threshold?: number; judge_model?: string; max_turns?: number }
+  bounds: { trials?: number; asr_threshold?: number; judge_model?: string; max_turns?: number; seed?: number }
   roe_confirmed: boolean
   dry_run?: boolean
   probes?: string[]
+  strategies?: string[]   // promptfoo: payload-mutation strategies
+  objective?: string      // pyrit: optional custom attack objective
   target_model?: string
+  // Free-text app description (shared): improves giskard/promptfoo/pyrit relevance.
+  target_purpose?: string
   // Target auth (shared): resolved from the UI auth mode.
   api_key?: string
   auth_header?: string

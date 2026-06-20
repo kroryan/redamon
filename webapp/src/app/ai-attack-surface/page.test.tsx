@@ -117,3 +117,75 @@ describe('AI Attack Surface page', () => {
     expect(screen.getByText('Launch giskard')).toBeTruthy()
   })
 })
+
+describe('AI Attack Surface — garak probe selection grid', () => {
+  beforeEach(() => { (hookState.launch as ReturnType<typeof vi.fn>).mockClear() })
+
+  const openGarak = () => {
+    render(<AiAttackSurfacePage />)
+    fireEvent.click(screen.getAllByText('Configure')[0])   // garak is first
+  }
+
+  test('shows the full catalog: toolbar count, a non-default family, and a description', () => {
+    openGarak()
+    expect(screen.getByText(/4 \/ 40 selected/)).toBeTruthy()
+    // a family that is NOT in the default MVP set is selectable...
+    expect(screen.getByText('Malware Generation (malwaregen)')).toBeTruthy()
+    // ...with its description rendered.
+    expect(screen.getByText(/Requests evasion code/)).toBeTruthy()
+  })
+
+  test('Select all / Clear / Reset to defaults update the selection', () => {
+    openGarak()
+    // "Select all" picks only the runnable probes — the 5 black-box-incompatible
+    // ones (audio/visual_jailbreak/glitch/fileformats/agent_breaker) are excluded.
+    fireEvent.click(screen.getByText('Select all'))
+    expect(screen.getByText(/35 \/ 40 selected/)).toBeTruthy()
+    fireEvent.click(screen.getByText('Clear'))
+    expect(screen.getByText(/0 \/ 40 selected/)).toBeTruthy()
+    fireEvent.click(screen.getByText('Reset to defaults'))
+    expect(screen.getByText(/4 \/ 40 selected/)).toBeTruthy()
+  })
+
+  test('launch sends exactly the four default families (and the selected target)', () => {
+    hookState.targets = [{ baseUrl: 'http://h:8000', path: '/v1/chat/completions', method: 'POST', interfaceType: 'llm-chat' }]
+    openGarak()
+    fireEvent.click(screen.getByText('http://h:8000/v1/chat/completions'))   // select target
+    fireEvent.click(screen.getByText(/I confirm this is an authorized/))      // RoE
+    fireEvent.click(screen.getByText('Launch garak'))
+
+    expect(hookState.launch).toHaveBeenCalledTimes(1)
+    const arg = (hookState.launch as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(arg.tool).toBe('garak')
+    expect([...arg.probes].sort()).toEqual(['dan', 'encoding', 'leakreplay', 'promptinject'])
+    expect(arg.roe_confirmed).toBe(true)
+    expect(arg.targets).toHaveLength(1)
+    expect(arg.targets[0]).toMatchObject({ baseurl: 'http://h:8000', path: '/v1/chat/completions' })
+  })
+
+  test('Select all then launch sends the 35 runnable families (excludes incompatible)', () => {
+    hookState.targets = [{ baseUrl: 'http://h:8000', path: '/v1/chat/completions', method: 'POST', interfaceType: 'llm-chat' }]
+    openGarak()
+    fireEvent.click(screen.getByText('Select all'))
+    fireEvent.click(screen.getByText('http://h:8000/v1/chat/completions'))
+    fireEvent.click(screen.getByText(/I confirm this is an authorized/))
+    fireEvent.click(screen.getByText('Launch garak'))
+
+    const arg = (hookState.launch as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(arg.probes).toHaveLength(35)
+    // the black-box-incompatible probes must never be sent
+    for (const blocked of ['audio', 'visual_jailbreak', 'glitch', 'fileformats', 'agent_breaker']) {
+      expect(arg.probes).not.toContain(blocked)
+    }
+  })
+
+  test('clearing all probes disables Launch (cannot launch with zero probes)', () => {
+    hookState.targets = [{ baseUrl: 'http://h:8000', path: '/v1/chat/completions', method: 'POST', interfaceType: 'llm-chat' }]
+    openGarak()
+    fireEvent.click(screen.getByText('http://h:8000/v1/chat/completions'))
+    fireEvent.click(screen.getByText(/I confirm this is an authorized/))
+    fireEvent.click(screen.getByText('Clear'))
+    const launchBtn = (screen.getByText('Launch garak').closest('button')) as HTMLButtonElement
+    expect(launchBtn.disabled).toBe(true)
+  })
+})

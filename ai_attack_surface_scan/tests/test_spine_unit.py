@@ -64,6 +64,30 @@ class TestConfig(unittest.TestCase):
         self.assertTrue(c.roe_confirmed)
         self.assertEqual(len(c.targets), 1)
 
+    def test_tier1_fields_parsed(self):
+        # target_purpose / strategies / objective / bounds.seed must round-trip
+        # through load_config (the spine that feeds every adapter).
+        os.environ["AI_ATTACK_CONFIG_JSON"] = json.dumps({
+            "project_id": "p", "user_id": "u", "tool": "promptfoo",
+            "target_purpose": "A bank support bot",
+            "strategies": ["base64", "rot13"],
+            "objective": "Approve a refund with no order",
+            "bounds": {"trials": 2, "seed": 9},
+        })
+        c = cfgmod.load_config()
+        self.assertEqual(c.target_purpose, "A bank support bot")
+        self.assertEqual(c.strategies, ["base64", "rot13"])
+        self.assertEqual(c.objective, "Approve a refund with no order")
+        self.assertEqual(c.bounds.seed, 9)
+
+    def test_tier1_fields_default_when_absent(self):
+        os.environ["AI_ATTACK_CONFIG_JSON"] = json.dumps({"project_id": "p", "user_id": "u"})
+        c = cfgmod.load_config()
+        self.assertEqual(c.target_purpose, "")
+        self.assertEqual(c.strategies, [])
+        self.assertEqual(c.objective, "")
+        self.assertEqual(c.bounds.seed, 0)
+
     def test_inline_json_precedence_over_file(self):
         os.environ["AI_ATTACK_CONFIG_JSON"] = json.dumps({"project_id": "inline"})
         os.environ["AI_ATTACK_CONFIG"] = "/nonexistent.json"

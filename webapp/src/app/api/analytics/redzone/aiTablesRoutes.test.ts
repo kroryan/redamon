@@ -64,7 +64,7 @@ describe('AI red-zone routes — guards', () => {
 
   test.each([
     ['aiSurface', aiSurface.GET, ['llmEndpoints', 'mcpServers', 'technologies', 'vectorDbs', 'models']],
-    ['aiRisk', aiRisk.GET, ['findings', 'injectableParams', 'ragPoints', 'exposedRuntimes', 'unauthenticatedMcp']],
+    ['aiRisk', aiRisk.GET, ['testedVulns', 'findings', 'injectableParams', 'ragPoints', 'exposedRuntimes', 'unauthenticatedMcp']],
   ])('%s smoke: empty graph -> 200 with all sheet keys as []', async (_name, handler, keys) => {
     const res = await handler(req('p1'))
     expect(res.status).toBe(200)
@@ -73,7 +73,7 @@ describe('AI red-zone routes — guards', () => {
       expect(body.sheets[k]).toEqual([])
       expect(body.meta[k]).toBe(0)
     }
-    expect(runCalls).toHaveLength(5) // one query per sheet
+    expect(runCalls).toHaveLength((keys as string[]).length) // one query per sheet
     expect(runCalls.every(c => c.params.pid === 'p1')).toBe(true)
   })
 })
@@ -164,18 +164,39 @@ describe('aiRisk route — field mapping', () => {
     const { sheets } = await res.json()
     expect(sheets.exposedRuntimes[0].exposedOn).toEqual([])
   })
+
+  test('testedVulns corroborates the attack tools by (OWASP, target)', async () => {
+    // 6th query = tested vulns. Two tools on the SAME OWASP+target -> one row.
+    runQueue = [[], [], [], [], [], [
+      { source: 'garak', severity: 'medium', type: 'ai_attack_jailbreak', owaspLlmId: 'LLM01',
+        asr: 0.4, trials: { low: 5, high: 0 }, payloadClass: 'garak-dan', transcriptRef: '/o/g.jsonl',
+        evidence: 'dan', probePackVersion: 'garak/0.15.1', target: 'http://h/v1', endpointPath: '/v1' },
+      { source: 'promptfoo', severity: 'high', type: 'ai_attack_jailbreak', owaspLlmId: 'LLM01',
+        asr: 0.7, trials: { low: 3, high: 0 }, payloadClass: 'promptfoo-pliny', transcriptRef: '/o/p.json',
+        evidence: 'pliny', probePackVersion: 'promptfoo/0.121.17', target: 'http://h/v1', endpointPath: '/v1' },
+    ]]
+    const res = await aiRisk.GET(req('p1'))
+    const { sheets, meta } = await res.json()
+    expect(meta.testedVulns).toBe(1)                       // corroborated into one row
+    expect(sheets.testedVulns[0]).toMatchObject({
+      owasp: 'LLM01', attack: 'jailbreak', target: 'http://h/v1/v1',
+      foundBy: ['garak', 'promptfoo'], asr: '70%', trials: 8, severity: 'high',
+    })
+  })
 })
 
 // --------------------------------------------------------------------------- //
 describe('aiRisk route — Cypher shape', () => {
   test('queries are project-scoped and target the right nodes', async () => {
     await aiRisk.GET(req('proj-x'))
-    expect(runCalls).toHaveLength(5)
+    expect(runCalls).toHaveLength(6)
     expect(runCalls[0].cypher).toMatch(/Vulnerability.*source: 'ai_surface_recon'/s)
     expect(runCalls[1].cypher).toMatch(/is_ai_prompt_injectable = true/)
     expect(runCalls[2].cypher).toMatch(/is_ai_rag_ingest = true/)
     expect(runCalls[3].cypher).toMatch(/\['ai-runtime','ai-proxy'\]/)
     expect(runCalls[4].cypher).toMatch(/ai_mcp_auth_required/)
+    // tested vulns queried last: the four attack-tool sources
+    expect(runCalls[5].cypher).toMatch(/source IN \['garak', 'pyrit', 'giskard', 'promptfoo'\]/)
     expect(runCalls.every(c => c.params.pid === 'proj-x')).toBe(true)
   })
 })

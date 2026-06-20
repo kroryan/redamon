@@ -285,6 +285,19 @@ function condenseForAgent(data: ReturnType<typeof gatherReportData> extends Prom
         isRagIngest: f.isRagIngest,
         promptInjectableParams: f.promptInjectableParams,
       })),
+      // CONFIRMED attack findings (garak/pyrit/giskard/promptfoo), corroborated
+      // across tools — the highest-signal AI evidence for the narrative (§9).
+      attackToolsRun: data.aiSurface.attackToolsRun,
+      attackFindings: data.aiSurface.attackFindings.slice(0, 25).map(f => ({
+        owaspLlmId: f.owaspLlmId,
+        attack: f.attackChip,
+        target: f.target,
+        foundBy: f.sources,
+        maxAsr: f.maxAsr,
+        trials: f.totalTrials,
+        severity: f.severity,
+        evidence: (f.evidence || '').slice(0, 160),
+      })),
     },
     otx: {
       totalPulses: data.otx.totalPulses,

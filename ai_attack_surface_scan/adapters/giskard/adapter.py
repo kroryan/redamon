@@ -29,7 +29,8 @@ _SEVERITY = {"major": "high", "medium": "medium", "minor": "low"}
 
 def run(target, bounds, output_dir: str, run_id: str,
         judge_base_url: str | None = None, detectors: list[str] | None = None,
-        target_model: str | None = None, api_key: str | None = None,
+        target_model: str | None = None, target_purpose: str | None = None,
+        api_key: str | None = None,
         auth_header: str | None = None, auth_scheme: str | None = None) -> list[Finding]:
     """Run giskard's LLM scan against one target. Failure-soft.
 
@@ -58,6 +59,9 @@ def run(target, bounds, output_dir: str, run_id: str,
         "judge_base_url": judge_base_url,
         "judge_model": bounds.judge_model or "qwen2.5:7b",
         "detectors": detectors,
+        # giskard generates its adversarial test set FROM the model description,
+        # so a real app purpose markedly improves detection. Falls back generic.
+        "description": (target_purpose or "").strip() or "A general-purpose LLM chat assistant.",
         "out": str(out / "giskard_report.json"),
     }
     cfg_path = out / "giskard_config.json"
@@ -71,25 +75,38 @@ def run(target, bounds, output_dir: str, run_id: str,
     report = parse_report(cfg["out"])
     logger.info(f"giskard: {len(report.issues)} issue(s) across {report.detectors}")
 
-    findings: list[Finding] = []
+    # Aggregate per detector: many issues from one detector share the same
+    # payload_class+target, so they would dedup to one graph node anyway. Pick the
+    # WORST severity (deterministic, vs. last-write-wins) and count the issues.
+    from collections import defaultdict
+    sev_rank = {"major": 3, "medium": 2, "minor": 1}
+    by_detector: dict[str, list] = defaultdict(list)
     for issue in report.issues:
-        owasp, chip = detector_meta(issue.detector)
+        by_detector[issue.detector].append(issue)
+
+    findings: list[Finding] = []
+    for detector, issues in by_detector.items():
+        owasp, chip = detector_meta(detector)
+        worst = max(issues, key=lambda i: sev_rank.get(i.severity, 0))
+        # giskard's num_examples is often 0; fall back to the issue count so the
+        # finding carries a meaningful "how many variants succeeded".
+        trials = sum(i.num_examples for i in issues) or len(issues)
         findings.append(Finding(
             source="giskard",
             chip=chip,
-            name=f"giskard {issue.detector}: {issue.severity}",
+            name=f"giskard {detector}: {worst.severity}",
             baseurl=getattr(target, "baseurl", "") or "",
             path=getattr(target, "path", "/") or "/",
-            severity=_SEVERITY.get(issue.severity, "low"),
-            description=issue.description or f"giskard {issue.detector} flagged an issue",
+            severity=_SEVERITY.get(worst.severity, "low"),
+            description=worst.description or f"giskard {detector} flagged an issue",
             ai_owasp_llm_id=owasp,
             ai_asr=1.0,                       # giskard: issue present (binary), not trials
-            ai_trials=issue.num_examples,
+            ai_trials=trials,
             ai_oracle_kind="judge_llm",
-            ai_payload_class=f"giskard-{issue.detector}",
+            ai_payload_class=f"giskard-{detector}",
             ai_transcript_ref=cfg["out"],
             ai_probe_pack_version=f"giskard/{report.giskard_version or '2.19.1'}",
-            evidence=f"{issue.detector}: {issue.num_examples} example(s)",
+            evidence=f"{detector}: {len(issues)} issue(s) (worst: {worst.severity})",
         ))
 
     logger.info(f"giskard: {len(findings)} finding(s)")

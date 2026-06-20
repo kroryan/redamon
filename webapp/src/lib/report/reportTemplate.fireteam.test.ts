@@ -50,6 +50,13 @@ function baseReportData(): any {
     jsRecon: { totalFindings: 0, bySeverity: [], byType: [], findings: [] },
     graphqlScan: { totalFindings: 0, endpointsTested: 0, introspectionEnabled: 0, bySeverity: [], byType: [], endpoints: [], findings: [] },
     otx: { totalPulses: 0, totalMalware: 0, enrichedIps: 0, adversaries: [], pulses: [], malware: [] },
+    vhostSni: { totalFindings: 0, ipsTested: 0, bySeverity: [], byType: [], findings: [] },
+    aiSurface: {
+      totalAiEndpoints: 0, ragIngestEndpoints: 0, promptInjectableParams: 0,
+      mcpServers: 0, mcpPoisoningFindings: 0, vectorDbs: 0,
+      modelFamilies: [], byInterfaceType: [], findings: [],
+      attackFindings: [], attackToolsRun: [],
+    },
     attackChains: { chains: [], exploitSuccesses: [], topFindings: [], totalChainFindings: 0 },
     metrics: {
       riskScore: 0, riskLabel: 'Low' as const,

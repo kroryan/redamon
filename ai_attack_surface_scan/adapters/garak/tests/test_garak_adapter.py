@@ -19,7 +19,7 @@ from config import Bounds
 from target_loader import Target
 
 from adapters.garak import adapter as gadapter
-from adapters.garak.owasp_map import family_of, map_family
+from adapters.garak.owasp_map import PROBE_FAMILY_MAP, family_of, map_family
 from adapters.garak.parser import FamilyResult, GarakReport, parse_report
 from adapters.garak.rest_config import build_rest_config
 
@@ -186,6 +186,50 @@ class TestOwaspMap(unittest.TestCase):
     def test_unknown_family_defaults(self):
         self.assertEqual(map_family("totallynew"), ("LLM01", "prompt-injection", "classifier"))
 
+    # Full garak 0.15.1 family catalog now selectable from the UI: every one must
+    # be classified (else its findings fall back to the LLM01/prompt-injection
+    # default). This list mirrors webapp/src/lib/aiAttackSurface.ts GARAK_CARD
+    # (minus the no-op `test` smoke probe).
+    UI_FAMILIES = {
+        "promptinject", "dan", "encoding", "leakreplay",
+        "latentinjection", "goodside", "agent_breaker",
+        "doctor", "grandma", "dra", "fitd", "phrasing", "suffix", "tap",
+        "goat", "glitch", "sata", "audio", "visual_jailbreak",
+        "sysprompt_extraction", "apikey", "propile", "divergence",
+        "smuggling", "realtoxicityprompts", "lmrc", "continuation",
+        "donotanswer", "atkgen", "topic", "malwaregen", "exploitation",
+        "av_spam_scanning", "fileformats", "ansiescape", "web_injection",
+        "badchars", "packagehallucination", "misleading", "snowball",
+    }
+
+    def test_full_garak_catalog_is_mapped(self):
+        self.assertEqual(len(self.UI_FAMILIES), 40)
+        missing = self.UI_FAMILIES - set(PROBE_FAMILY_MAP)
+        self.assertEqual(missing, set(), f"unmapped families: {sorted(missing)}")
+
+    def test_all_map_entries_have_valid_shape(self):
+        valid_chips = {
+            "prompt-injection", "jailbreak", "system-prompt-leak",
+            "data-disclosure", "encoding-bypass", "toxicity", "bias",
+            "hallucination", "harmful-generation", "insecure-output",
+            "supply-chain",
+        }
+        valid_oracles = {"classifier", "contains", "judge_llm"}
+        for fam, entry in PROBE_FAMILY_MAP.items():
+            self.assertEqual(len(entry), 3, f"{fam} entry not a 3-tuple")
+            owasp, chip, oracle = entry
+            self.assertRegex(owasp, r"^(LLM\d{2}|safety)$", f"{fam} owasp={owasp}")
+            self.assertIn(chip, valid_chips, f"{fam} chip={chip}")
+            self.assertIn(oracle, valid_oracles, f"{fam} oracle={oracle}")
+
+    def test_new_family_mappings(self):
+        self.assertEqual(map_family("sysprompt_extraction"),
+                         ("LLM07", "system-prompt-leak", "contains"))
+        self.assertEqual(map_family("packagehallucination")[1], "supply-chain")
+        self.assertEqual(map_family("web_injection")[1], "insecure-output")
+        self.assertEqual(map_family("malwaregen")[1], "harmful-generation")
+        self.assertEqual(map_family("exploitation")[0], "LLM05")
+
 
 # --------------------------------------------------------------------------- #
 # Adapter — Finding construction (garak subprocess + parser mocked)
@@ -225,6 +269,54 @@ class TestAdapterFindings(unittest.TestCase):
              patch.object(gadapter, "run_garak_scan", return_value=(None, 1, "boom")):
             findings = gadapter.run(self._target(), Bounds(), output_dir=d, run_id="t1")
         self.assertEqual(findings, [])
+
+    def test_explicit_seed_zero_is_honored(self):
+        # bounds.seed=0 must reach garak even when the env default seed is non-zero.
+        captured = {}
+
+        def fake_scan(*a, **k):
+            captured.update(k)
+            return (None, 1, "")
+        with tempfile.TemporaryDirectory() as d, \
+             patch.dict(os.environ, {"AI_ATTACK_GARAK_SEED": "99"}), \
+             patch.object(gadapter, "run_garak_scan", side_effect=fake_scan):
+            gadapter.run(self._target(), Bounds(seed=0), output_dir=d, run_id="t1")
+        self.assertEqual(captured["seed"], 0)
+
+
+class TestRunnerEgress(unittest.TestCase):
+    """The garak subprocess must never inherit a hosted OPENAI_API_KEY."""
+    def test_openai_key_stripped_and_judge_forced(self):
+        from adapters.garak import runner
+        from types import SimpleNamespace
+        captured = {}
+
+        def fake_run(cmd, env=None, **k):
+            captured["env"] = env
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-LEAK", "OPENAI_API_BASE": "https://api.openai.com/v1"}), \
+             patch.object(runner.subprocess, "run", side_effect=fake_run):
+            runner.run_garak_scan(config_path="/x.json", probes=["dan"], generations=1,
+                                  seed=0, report_prefix="/tmp/none/x",
+                                  judge_base_url="http://o:11434")
+        env = captured["env"]
+        self.assertEqual(env.get("OPENAI_API_KEY"), "ollama-local")
+        self.assertEqual(env.get("OPENAI_API_BASE"), "http://o:11434/v1")
+        self.assertNotIn("sk-LEAK", list(env.values()))
+
+    def test_openai_key_stripped_even_with_no_judge(self):
+        from adapters.garak import runner
+        from types import SimpleNamespace
+        captured = {}
+
+        def fake_run(cmd, env=None, **k):
+            captured["env"] = env
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-LEAK"}), \
+             patch.object(runner.subprocess, "run", side_effect=fake_run):
+            runner.run_garak_scan(config_path="/x.json", probes=["dan"], generations=1,
+                                  seed=0, report_prefix="/tmp/none/x", judge_base_url=None)
+        self.assertNotIn("OPENAI_API_KEY", captured["env"])
 
 
 if __name__ == "__main__":

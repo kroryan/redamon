@@ -32,12 +32,20 @@ export default function AiAttackSurfacePage() {
 
   // garak detail-view state
   const [selectedTargets, setSelectedTargets] = useState<Set<string>>(new Set())
-  const [selectedProbes, setSelectedProbes] = useState<Set<string>>(new Set(['dan']))
+  const [selectedProbes, setSelectedProbes] = useState<Set<string>>(
+    new Set(['promptinject', 'dan', 'encoding', 'leakreplay']),
+  )
   const [trials, setTrials] = useState(1)
   const [asrThreshold, setAsrThreshold] = useState(0.3)
   const [judgeModel, setJudgeModel] = useState('qwen2.5:7b')
   const [maxTurns, setMaxTurns] = useState(4)
+  const [seed, setSeed] = useState(0)
   const [roeConfirmed, setRoeConfirmed] = useState(false)
+  // Shared: free-text description of the target app. Lifts giskard/promptfoo/pyrit.
+  const [targetPurpose, setTargetPurpose] = useState('')
+  // promptfoo: payload-mutation strategies. pyrit: optional custom objective.
+  const [selectedStrategies, setSelectedStrategies] = useState<Set<string>>(new Set(['basic']))
+  const [objective, setObjective] = useState('')
 
   // Shared: target auth (None / Bearer / Custom header) — reused by every tool.
   const [authMode, setAuthMode] = useState<AuthMode>('none')
@@ -93,11 +101,17 @@ export default function AiAttackSurfacePage() {
   // The tool whose detail view is open (garak / pyrit / …).
   const openCard = ALL_CARDS.find((c) => c.id === openTool && c.available) || null
 
+  // The card's default probe selection: families flagged `default`, else its first.
+  const defaultProbeIds = (card: ToolCard): string[] => {
+    const flagged = card.probes.filter((p) => p.default).map((p) => p.id)
+    return flagged.length ? flagged : card.probes.slice(0, 1).map((p) => p.id)
+  }
+
   // Open a tool's detail view, defaulting its strategy selection.
   const openConfig = (card: ToolCard) => {
     if (openTool === card.id) { setOpenTool(null); return }
     setOpenTool(card.id)
-    setSelectedProbes(new Set(card.probes.length ? [card.probes[0].id] : []))
+    setSelectedProbes(new Set(defaultProbeIds(card)))
   }
 
   const launchTool = async () => {
@@ -115,9 +129,12 @@ export default function AiAttackSurfacePage() {
     await s.launch({
       tool: openCard.id,
       targets: [...graphTargets, ...custom],
-      bounds: { trials, asr_threshold: asrThreshold, judge_model: judgeModel, max_turns: maxTurns },
+      bounds: { trials, asr_threshold: asrThreshold, judge_model: judgeModel, max_turns: maxTurns, seed },
       roe_confirmed: roeConfirmed,
       probes: Array.from(selectedProbes),
+      strategies: openCard.id === 'promptfoo' ? Array.from(selectedStrategies) : undefined,
+      objective: openCard.id === 'pyrit' && objective.trim() ? objective.trim() : undefined,
+      target_purpose: targetPurpose.trim() || undefined,
       ...auth,
     })
   }
@@ -243,19 +260,51 @@ export default function AiAttackSurfacePage() {
           {/* 2. Probes / strategies (tool-specific) */}
           <section className={styles.block}>
             <h3 className={styles.blockTitle}>2. {openCard.style === 'multi-turn' ? 'Attack strategies' : 'Probes'}</h3>
-            <div className={styles.probeRow}>
-              {openCard.probes.map((p) => (
-                <label key={p.id} className={styles.probe}>
-                  <input type="checkbox" checked={selectedProbes.has(p.id)}
-                         onChange={() => toggle(selectedProbes, p.id, setSelectedProbes)} />
-                  {p.label}
-                </label>
-              ))}
+            {openCard.probes.length > 6 && (
+              <div className={styles.probeToolbar}>
+                <span className={styles.probeCount}>{selectedProbes.size} / {openCard.probes.length} selected</span>
+                <button type="button" className={styles.probeToolBtn}
+                        onClick={() => setSelectedProbes(new Set(openCard.probes.filter((p) => !p.requires).map((p) => p.id)))}>
+                  Select all
+                </button>
+                <button type="button" className={styles.probeToolBtn}
+                        onClick={() => setSelectedProbes(new Set(defaultProbeIds(openCard)))}>
+                  Reset to defaults
+                </button>
+                <button type="button" className={styles.probeToolBtn}
+                        onClick={() => setSelectedProbes(new Set())}>
+                  Clear
+                </button>
+              </div>
+            )}
+            <div className={styles.probeGrid}>
+              {openCard.probes.map((p) => {
+                const on = selectedProbes.has(p.id)
+                // Probes needing a capability our black-box HTTP chat target can't
+                // offer are disabled — they would only ever return zero findings.
+                const blocked = Boolean(p.requires)
+                return (
+                  <label key={p.id}
+                         className={`${styles.probeCard} ${on ? styles.probeCardOn : ''} ${blocked ? styles.probeCardOff : ''}`}
+                         title={blocked ? `Disabled — requires ${p.requires}` : undefined}>
+                    <input type="checkbox" checked={on} disabled={blocked}
+                           onChange={() => toggle(selectedProbes, p.id, setSelectedProbes)} />
+                    <span className={styles.probeBody}>
+                      <span className={styles.probeName}>
+                        {p.label}<Chip chip={p.chip} />
+                        {blocked && <span className={styles.probeBadge}>needs {p.requires}</span>}
+                      </span>
+                      <span className={styles.probeDesc}>{p.description}</span>
+                    </span>
+                  </label>
+                )
+              })}
             </div>
             <p className={styles.hint}>
               {openCard.style === 'multi-turn'
                 ? 'Each strategy runs bounded multi-turn objectives via the local judge.'
-                : 'Whole families can be slow on CPU; start with one (e.g. dan) to validate.'}
+                : 'Selecting a family runs all of its sub-probes; whole families can be slow on CPU. '
+                  + 'Some families (audio, visual_jailbreak, suffix/GCG, glitch) need a multimodal target or model internals.'}
             </p>
           </section>
 
@@ -273,7 +322,51 @@ export default function AiAttackSurfacePage() {
                 <label>Max turns<input type="number" min={1} value={maxTurns}
                        onChange={(e) => setMaxTurns(parseInt(e.target.value) || 1)} /></label>
               )}
+              <label title="RNG seed — part of the reproducibility envelope (garak / pyrit)">
+                Seed<input type="number" min={0} value={seed}
+                     onChange={(e) => setSeed(parseInt(e.target.value) || 0)} /></label>
             </div>
+
+            {/* promptfoo: payload-mutation strategies (local, zero-egress). */}
+            {openCard.id === 'promptfoo' && openCard.strategies && (
+              <label className={styles.purposeLabel}>
+                <span>Strategies — wrap each payload in an encoding (tests decode-and-comply)</span>
+                <span className={styles.strategyRow}>
+                  {openCard.strategies.map((st) => (
+                    <button key={st.id} type="button"
+                            className={`${styles.strategyChip} ${selectedStrategies.has(st.id) ? styles.strategyChipOn : ''}`}
+                            onClick={() => toggle(selectedStrategies, st.id, setSelectedStrategies)}>
+                      {st.label}
+                    </button>
+                  ))}
+                </span>
+              </label>
+            )}
+
+            {/* pyrit: optional custom objective (the specific harmful goal). */}
+            {openCard.id === 'pyrit' && (
+              <label className={styles.purposeLabel}>
+                <span>Custom objective <em>(optional)</em> — overrides the attack&apos;s built-in goals</span>
+                <input type="text" className={styles.purposeInput}
+                       placeholder="e.g. Get the bot to approve a refund without an order number"
+                       value={objective} onChange={(e) => setObjective(e.target.value)} />
+              </label>
+            )}
+
+            {/* Target purpose (shared) — giskard/promptfoo/pyrit generate & grade
+                attacks from the app description; a real one sharpens detection. */}
+            {['giskard', 'promptfoo', 'pyrit'].includes(openCard.id) && (
+              <label className={styles.purposeLabel}>
+                <span>Target purpose <em>(optional)</em> — what the app does; sharpens giskard / promptfoo / pyrit</span>
+                <textarea
+                  rows={2}
+                  className={styles.purposeInput}
+                  placeholder="e.g. A customer-support assistant for an online bank that can look up orders and issue refunds"
+                  value={targetPurpose}
+                  onChange={(e) => setTargetPurpose(e.target.value)}
+                />
+              </label>
+            )}
 
             {/* Target authentication (shared) */}
             <div className={styles.authBlock}>
@@ -348,7 +441,7 @@ export default function AiAttackSurfacePage() {
             <thead>
               <tr>
                 <th>Tool</th><th>OWASP</th><th>Attack</th><th>Target</th>
-                <th>ASR</th><th>Trials</th><th>Severity</th><th>Evidence</th>
+                <th>ASR</th><th>Trials</th><th>Severity</th><th>Evidence</th><th>Report</th>
               </tr>
             </thead>
             <tbody>
@@ -362,6 +455,10 @@ export default function AiAttackSurfacePage() {
                   <td>{f.trials ?? '—'}</td>
                   <td><span className={styles.sevDot} style={{ background: sevColor(f.severity) }} />{f.severity}</td>
                   <td className={styles.ev}>{f.evidence}</td>
+                  <td>{f.transcriptRef && projectId
+                    ? <a href={`/api/ai-attack-surface/${projectId}/transcript?ref=${encodeURIComponent(f.transcriptRef)}`}
+                         target="_blank" rel="noopener noreferrer">view</a>
+                    : '—'}</td>
                 </tr>
               ))}
             </tbody>

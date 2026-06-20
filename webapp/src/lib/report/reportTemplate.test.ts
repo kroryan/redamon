@@ -114,6 +114,8 @@ function makeReportData(overrides: Partial<ReportData> = {}): ReportData {
       modelFamilies: [],
       byInterfaceType: [],
       findings: [],
+      attackFindings: [],
+      attackToolsRun: [],
     },
     vhostSni: {
       totalFindings: 0,
@@ -228,6 +230,55 @@ describe('Conditional Section Rendering', () => {
     expect(html).toContain('Secret Detection')
     expect(html).toContain('AWSAccessKey')
     expect(html).toContain('validated')
+  })
+
+  test('AI Surface section renders the corroborated AI Attack Surface findings (§9)', () => {
+    const data = makeReportData({
+      aiSurface: {
+        totalAiEndpoints: 0, ragIngestEndpoints: 0, promptInjectableParams: 0,
+        mcpServers: 0, mcpPoisoningFindings: 0, vectorDbs: 0,
+        modelFamilies: [], byInterfaceType: [], findings: [],
+        attackToolsRun: ['garak', 'promptfoo'],
+        attackFindings: [{
+          owaspLlmId: 'LLM01', attackChip: 'jailbreak',
+          target: 'http://h/v1/chat/completions', endpointPath: '/v1/chat/completions',
+          sources: ['garak', 'promptfoo'], severity: 'high', maxAsr: 0.67, totalTrials: 8,
+          payloadClasses: ['garak-dan', 'promptfoo-pliny'],
+          transcriptRefs: ['/out/garak.jsonl'], probePackVersions: ['garak/0.15.1'],
+          evidence: 'dan jailbreak succeeded',
+        }],
+      },
+    })
+    const html = generateReportHtml(data, null)
+    expect(html).toContain('id="ai-surface"')              // section shows even with no recon AI endpoints
+    expect(html).toContain('Tested Vulnerabilities')
+    expect(html).toContain('LLM01')
+    expect(html).toContain('67%')                          // maxAsr rendered as percent
+    expect(html).toContain('garak + promptfoo')            // corroboration marker
+  })
+
+  test('AI Surface recon table escapes attacker-controlled values (XSS guard)', () => {
+    const data = makeReportData({
+      aiSurface: {
+        totalAiEndpoints: 1, ragIngestEndpoints: 0, promptInjectableParams: 1,
+        mcpServers: 0, mcpPoisoningFindings: 0, vectorDbs: 0,
+        modelFamilies: ['<img src=x onerror=alert(1)>'],
+        byInterfaceType: [{ interfaceType: '<b>llm</b>', count: 1 }],
+        findings: [{
+          baseUrl: 'http://h/<script>alert(1)</script>', path: '/a"><script>x</script>',
+          interfaceType: 'llm-chat', isRagIngest: false,
+          promptInjectableParams: ['<svg/onload=alert(1)>'], hasPromptParams: true,
+        }],
+        attackFindings: [], attackToolsRun: [],
+      },
+    })
+    const html = generateReportHtml(data, null)
+    // the raw HTML tags must be neutralized (< escaped) so nothing executes —
+    // the inner text (onerror=…) surviving as inert text is fine.
+    expect(html).not.toContain('<script>alert(1)</script>')
+    expect(html).not.toContain('<img src=x')
+    expect(html).not.toContain('<svg/onload')
+    expect(html).toContain('&lt;script&gt;')               // escaped form present
   })
 
   test('JS Recon section NOT rendered when no findings', () => {

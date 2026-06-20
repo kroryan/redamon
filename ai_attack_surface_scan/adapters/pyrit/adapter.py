@@ -37,7 +37,9 @@ def _severity(asr: float) -> str:
 
 def run(target, bounds, output_dir: str, run_id: str,
         judge_base_url: str | None = None, attacks: list[str] | None = None,
-        target_model: str | None = None, api_key: str | None = None,
+        objective: str | None = None,
+        target_model: str | None = None, target_purpose: str | None = None,
+        api_key: str | None = None,
         auth_header: str | None = None, auth_scheme: str | None = None) -> list[Finding]:
     """Run the selected PyRIT attacks against one target. Failure-soft.
 
@@ -61,9 +63,12 @@ def run(target, bounds, output_dir: str, run_id: str,
     findings: list[Finding] = []
     threshold = float(bounds.asr_threshold)
 
+    # A custom objective (from the UI) overrides every attack's built-in goals,
+    # so the operator can target a specific harmful outcome for this app.
+    custom = (objective or "").strip()
     for attack in attacks:
         meta = attack_meta(attack)
-        objectives = meta["objectives"]
+        objectives = [custom] if custom else meta["objectives"]
         if not objectives:
             continue
         cfg = {
@@ -79,9 +84,12 @@ def run(target, bounds, output_dir: str, run_id: str,
             "judge_model": bounds.judge_model or "qwen2.5:7b",
             "attack": attack,
             "objectives": objectives,
+            # App context for the adversarial chat (consumed by pyrit_run when set);
+            # lets the attacker model frame its turns for this specific target.
+            "target_purpose": (target_purpose or "").strip(),
             "max_turns": int(bounds.max_turns),
             "max_backtracks": 5,
-            "seed": DEFAULT_SEED,
+            "seed": int(bounds.seed) if getattr(bounds, "seed", None) is not None else DEFAULT_SEED,
             "out": str(out / f"pyrit_{attack}.json"),
         }
         cfg_path = out / f"pyrit_{attack}_config.json"

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/app/api/graph/neo4j'
+import { corroborateAttackFindings, type RawAttackRow } from '@/lib/report/aiAttackFindings'
 
 function toNum(val: unknown): number | null {
   if (val == null) return null
@@ -67,7 +68,43 @@ export async function GET(request: NextRequest) {
        ORDER BY ep.baseurl LIMIT 500`,
       { pid })
 
+    // --- Tested vulnerabilities (garak/pyrit/giskard/promptfoo), corroborated
+    // across tools by (OWASP-LLM id, target) — the confirmed AI attack findings.
+    // Queried LAST so the earlier sheets' query order stays stable. ---
+    const tested = await session.run(
+      `MATCH (v:Vulnerability {project_id: $pid})
+       WHERE v.source IN ['garak', 'pyrit', 'giskard', 'promptfoo']
+       OPTIONAL MATCH (parent)-[:HAS_VULNERABILITY]->(v)
+       RETURN v.source AS source, v.severity AS severity, v.type AS type,
+              v.ai_owasp_llm_id AS owaspLlmId, v.ai_asr AS asr, v.ai_trials AS trials,
+              v.ai_payload_class AS payloadClass, v.ai_transcript_ref AS transcriptRef,
+              v.evidence AS evidence, v.ai_probe_pack_version AS probePackVersion,
+              coalesce(parent.baseurl, parent.url, parent.name, v.ai_target_url) AS target,
+              parent.path AS endpointPath
+       ORDER BY v.ai_asr DESC LIMIT 2000`,
+      { pid })
+    const rawTested: RawAttackRow[] = tested.records.map((r: { get: (k: string) => unknown }) => ({
+      source: (r.get('source') as string) || '', severity: (r.get('severity') as string) || 'info',
+      type: (r.get('type') as string) || null, owaspLlmId: (r.get('owaspLlmId') as string) || null,
+      asr: toNum(r.get('asr')), trials: toNum(r.get('trials')),
+      payloadClass: (r.get('payloadClass') as string) || null,
+      transcriptRef: (r.get('transcriptRef') as string) || null,
+      evidence: (r.get('evidence') as string) || null,
+      probePackVersion: (r.get('probePackVersion') as string) || null,
+      target: (r.get('target') as string) || null, endpointPath: (r.get('endpointPath') as string) || null,
+    }))
+
     const sheets = {
+      testedVulns: corroborateAttackFindings(rawTested).map(f => ({
+        severity: f.severity,
+        owasp: f.owaspLlmId,
+        attack: f.attackChip,
+        target: f.target + (f.endpointPath || ''),
+        foundBy: f.sources,
+        asr: f.maxAsr != null ? `${Math.round(f.maxAsr * 100)}%` : '—',
+        trials: f.totalTrials,
+        evidence: f.evidence,
+      })),
       findings: findings.records.map((r: { get: (key: string) => unknown }) => ({
         severity: r.get('severity'), type: r.get('type'), name: r.get('name'),
         owasp: r.get('owasp'), atlas: r.get('atlas'), payloadClass: r.get('payloadClass'),
@@ -95,6 +132,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       sheets,
       meta: {
+        testedVulns: sheets.testedVulns.length,
         findings: sheets.findings.length,
         injectableParams: sheets.injectableParams.length,
         ragPoints: sheets.ragPoints.length,

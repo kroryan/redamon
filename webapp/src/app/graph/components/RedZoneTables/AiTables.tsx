@@ -227,6 +227,18 @@ const AI_RISK_SHEETS: SheetDef[] = [
       { key: 'serverName', header: 'Server', kind: 'text' },
       { key: 'toolCount', header: 'Tools', kind: 'num' },
     ] },
+  { key: 'testedVulns', label: 'Tested Vulnerabilities',
+    empty: 'No AI Attack Surface findings yet. Run a garak / PyRIT / giskard / promptfoo scan.',
+    columns: [
+      { key: 'severity', header: 'Severity', kind: 'sev' },
+      { key: 'owasp', header: 'OWASP-LLM', kind: 'text' },
+      { key: 'attack', header: 'Attack', kind: 'text' },
+      { key: 'target', header: 'Target', kind: 'url' },
+      { key: 'foundBy', header: 'Found By', kind: 'list' },
+      { key: 'asr', header: 'ASR', kind: 'text' },
+      { key: 'trials', header: 'Trials', kind: 'num' },
+      { key: 'evidence', header: 'Evidence', kind: 'text', max: 200 },
+    ] },
 ]
 
 interface Props { projectId: string | null }

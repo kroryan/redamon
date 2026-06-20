@@ -22,6 +22,9 @@ class Bounds:
     asr_threshold: float = 0.3
     judge_model: str = ""
     max_turns: int = 4
+    # RNG seed for tools that support it (garak --seed, pyrit) — part of the
+    # reproducibility envelope. Default 0 (deterministic baseline).
+    seed: int = 0
     # Hard guardrail floor — categories blocked before any payload leaves the
     # container, regardless of other settings (§10). Read-only floor.
     hard_blocked_categories: list[str] = field(
@@ -60,6 +63,16 @@ class RunConfig:
     # Optional per-tool probe/plugin override (e.g. garak probe families). Empty
     # => the adapter's default catalog.
     probes: list[str] = field(default_factory=list)
+    # Free-text description of what the target app does. Shared across tools that
+    # generate/grade from app context (giskard description, promptfoo purpose,
+    # pyrit objective framing). Empty => a generic default per tool.
+    target_purpose: str = ""
+    # promptfoo: payload-mutation strategies (base64/rot13/leetspeak/...). Empty
+    # => the adapter derives from chips / defaults to ["basic"].
+    strategies: list[str] = field(default_factory=list)
+    # pyrit: optional custom attack objective (the harmful goal). Empty => the
+    # selected attack's built-in objectives.
+    objective: str = ""
 
 
 def load_config() -> RunConfig:
@@ -94,6 +107,7 @@ def load_config() -> RunConfig:
         asr_threshold=float(bounds_data.get("asr_threshold", 0.3)),
         judge_model=str(bounds_data.get("judge_model", "")),
         max_turns=int(bounds_data.get("max_turns", 4)),
+        seed=int(bounds_data.get("seed", 0) or 0),
     )
 
     return RunConfig(
@@ -111,4 +125,7 @@ def load_config() -> RunConfig:
         auth_header=str(data.get("auth_header", "") or ""),
         auth_scheme=str(data.get("auth_scheme", "") or ""),
         probes=data.get("probes", []) or [],
+        target_purpose=str(data.get("target_purpose", "") or ""),
+        strategies=data.get("strategies", []) or [],
+        objective=str(data.get("objective", "") or ""),
     )

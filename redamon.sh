@@ -13,8 +13,22 @@ LEGACY_SKIPKBASE_FLAG_FILE="$SCRIPT_DIR/.skipkbase"
 
 # Service lists
 CORE_SERVICES="postgres neo4j recon-orchestrator kali-sandbox agent webapp"
-TOOL_IMAGES="redamon-recon:latest redamon-vuln-scanner:latest redamon-github-hunter:latest redamon-trufflehog:latest redamon-baddns:latest"
+# Build-only images spawned on demand by the recon-orchestrator (NOT long-running
+# services). All live under the compose `tools` profile and the redamon-* tag
+# namespace. ai-attack-surface is the AI Attack Surface scanner (garak/pyrit/
+# giskard/promptfoo).
+TOOL_IMAGES="redamon-recon:latest redamon-vuln-scanner:latest redamon-github-hunter:latest redamon-trufflehog:latest redamon-baddns:latest redamon-ai-attack-surface:latest"
 DEV_COMPOSE="-f docker-compose.yml -f docker-compose.dev.yml"
+
+# Orchestrator-spawned containers that docker compose does NOT manage (they are
+# created at runtime via the Docker API, so `compose down` leaves them behind and
+# they must be wiped explicitly):
+#   - AI Attack Surface scan containers:  redamon-ai-attack-<proj>-<run>
+#   - On-demand local LLM (Ollama) judge/attacker:  redamon-local-llm
+SPAWNED_CONTAINER_NAME_FILTERS=(--filter "name=redamon-ai-attack-" --filter "name=redamon-local-llm")
+# The on-demand local LLM image (pulled at runtime, not built) + its models volume.
+LOCAL_LLM_IMAGE="${LOCAL_LLM_IMAGE:-ollama/ollama:latest}"
+LOCAL_LLM_VOLUME="${LOCAL_LLM_VOLUME:-redamon_llm_models}"
 
 # Colors
 RED='\033[0;31m'
@@ -187,6 +201,20 @@ cmd_reset_password() {
     echo ""
 }
 
+# Wipe the orchestrator-spawned, non-compose-managed containers (AI Attack Surface
+# scan containers + the on-demand local LLM). Safe to call anytime — a no-op when
+# none are present. Must run BEFORE `compose down --volumes` so the local-llm
+# container releases the models volume and it can actually be removed.
+remove_spawned_containers() {
+    local ids
+    ids=$(docker ps -aq "${SPAWNED_CONTAINER_NAME_FILTERS[@]}" 2>/dev/null || true)
+    if [[ -n "$ids" ]]; then
+        info "Removing orchestrator-spawned AI containers (scan + local LLM)..."
+        # shellcheck disable=SC2086
+        docker rm -f $ids >/dev/null 2>&1 || true
+    fi
+}
+
 remove_redamon_images() {
     # Remove locally-built redamon images
     docker images --format '{{.Repository}}:{{.Tag}}' \
@@ -212,6 +240,9 @@ remove_redamon_images() {
         "frost19k/puredns"
         "jauderho/hakrawler"
         "trufflesecurity/trufflehog"
+        # On-demand local LLM (Ollama) for the AI Attack Surface judge/attacker —
+        # pulled at runtime by the orchestrator, not built.
+        "$LOCAL_LLM_IMAGE"
     )
     for img in "${runtime_images[@]}"; do
         docker rmi "$img" 2>/dev/null || true
@@ -711,7 +742,7 @@ cmd_update() {
     if [[ "$rebuild_all" == "true" ]]; then
         info "docker-compose.yml changed -- rebuilding all images"
         rebuild_core=(recon-orchestrator kali-sandbox agent webapp)
-        rebuild_tools=(recon vuln-scanner github-secret-hunter trufflehog-scanner)
+        rebuild_tools=(recon vuln-scanner github-secret-hunter trufflehog-scanner ai-attack-surface)
     else
         # webapp: always needs rebuild (no volume mount in production)
         if echo "$changed_files" | grep -q "^webapp/"; then
@@ -756,6 +787,14 @@ cmd_update() {
         fi
         if echo "$changed_files" | grep -q "^baddns_scan/"; then
             rebuild_tools+=(baddns-scanner)
+        fi
+
+        # ai-attack-surface: heavy build-only image (Node + promptfoo + per-tool
+        # venvs). The adapter .py files are volume-mounted into the scan container
+        # at spawn (hot-reload, no rebuild); ONLY the baked-in toolchain — the
+        # Dockerfile or any requirements file — needs a rebuild.
+        if echo "$changed_files" | grep -qE "^ai_attack_surface_scan/(Dockerfile|.*requirements)"; then
+            rebuild_tools+=(ai-attack-surface)
         fi
     fi
 
@@ -950,6 +989,10 @@ cmd_up() {
 
 cmd_down() {
     info "Stopping RedAmon..."
+    # The on-demand LLM + any in-flight AI scan containers are orchestrator-spawned
+    # (not compose-managed), so stop them too — otherwise the local LLM keeps
+    # holding RAM after `down`.
+    remove_spawned_containers
     docker compose down
     success "All services stopped. Volumes and images preserved."
 }
@@ -965,6 +1008,7 @@ cmd_clean() {
     fi
 
     info "Stopping containers..."
+    remove_spawned_containers
     docker compose --profile tools down
 
     info "Removing RedAmon images..."
@@ -994,7 +1038,14 @@ cmd_purge() {
     fi
 
     info "Stopping containers and removing volumes..."
+    # Remove orchestrator-spawned containers FIRST: the on-demand local LLM holds
+    # the models volume, so `down --volumes` can't remove it until that container
+    # is gone.
+    remove_spawned_containers
     docker compose --profile tools down --volumes --remove-orphans
+    # Belt-and-suspenders: explicitly drop the local-LLM models volume in case it
+    # was created outside the compose lifecycle.
+    docker volume rm "$LOCAL_LLM_VOLUME" >/dev/null 2>&1 || true
 
     info "Removing RedAmon images..."
     remove_redamon_images
@@ -1103,6 +1154,17 @@ cmd_status() {
         # Fall back to plain ps so the user still sees the "no services" message.
         docker compose ps
     }
+
+    # Orchestrator-spawned AI containers (NOT compose-managed, so absent above):
+    # the on-demand local LLM + any in-flight AI Attack Surface scan containers.
+    local spawned
+    spawned=$(docker ps "${SPAWNED_CONTAINER_NAME_FILTERS[@]}" \
+                --format '    {{.Names}}  ({{.Status}})' 2>/dev/null || true)
+    if [[ -n "$spawned" ]]; then
+        echo ""
+        echo -e "  ${CYAN}AI Attack Surface (on-demand, orchestrator-spawned):${NC}"
+        echo "$spawned"
+    fi
 }
 
 # ---------------------------------------------------------------------------

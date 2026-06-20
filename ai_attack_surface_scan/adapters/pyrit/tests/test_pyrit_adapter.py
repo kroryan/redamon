@@ -146,6 +146,54 @@ class TestAdapterFindings(unittest.TestCase):
         self.assertEqual(f.ai_oracle_kind, "judge_llm")
         self.assertAlmostEqual(f.ai_asr, 0.5)
 
+    def test_custom_objective_and_seed_reach_config(self):
+        from adapters.pyrit.parser import PyritReport, PyritResult
+        report = PyritReport(attack="tap", pyrit_version="0.14.0", seed=7,
+                             results=[PyritResult("o", "SUCCESS", 1, "ok")])
+        captured = {}
+        with tempfile.TemporaryDirectory() as d:
+            def fake_invoke(cfg_path):
+                with open(cfg_path) as fh:
+                    captured.update(json.load(fh))
+                open(captured["out"], "w").close()
+                return 0, ""
+            with patch.object(padapter, "_invoke", side_effect=fake_invoke), \
+                 patch.object(padapter, "parse_report", return_value=report):
+                padapter.run(self._target(), Bounds(asr_threshold=0.3, judge_model="m", seed=7),
+                             output_dir=d, run_id="t1", judge_base_url="http://localhost:11434",
+                             attacks=["tap"], objective="Approve a refund with no order number")
+        # custom objective overrides the attack's built-in goals; seed flows from bounds
+        self.assertEqual(captured["objectives"], ["Approve a refund with no order number"])
+        self.assertEqual(captured["seed"], 7)
+        self.assertEqual(captured["attack"], "tap")
+
+    def test_explicit_seed_zero_is_honored(self):
+        from adapters.pyrit.parser import PyritReport, PyritResult
+        report = PyritReport(attack="crescendo", pyrit_version="0.14.0", seed=0,
+                             results=[PyritResult("o", "SUCCESS", 1, "ok")])
+        captured = {}
+        with tempfile.TemporaryDirectory() as d, \
+             patch.dict(os.environ, {"AI_ATTACK_PYRIT_SEED": "99"}):
+            def fake_invoke(cfg_path):
+                with open(cfg_path) as fh:
+                    captured.update(json.load(fh))
+                open(captured["out"], "w").close()
+                return 0, ""
+            with patch.object(padapter, "_invoke", side_effect=fake_invoke), \
+                 patch.object(padapter, "parse_report", return_value=report):
+                padapter.run(self._target(), Bounds(asr_threshold=0.3, judge_model="m", seed=0),
+                             output_dir=d, run_id="t1", judge_base_url="http://localhost:11434",
+                             attacks=["crescendo"])
+        self.assertEqual(captured["seed"], 0)   # not overridden by the env default
+
+    def test_new_attacks_have_class_mappings(self):
+        from adapters.pyrit.objectives import ATTACK_CLASSES, ATTACKS
+        for a in ("crescendo", "skeleton_key", "tap", "many_shot"):
+            self.assertIn(a, ATTACK_CLASSES)
+            self.assertIn(a, ATTACKS)
+        self.assertEqual(ATTACK_CLASSES["tap"], "TAPAttack")
+        self.assertEqual(ATTACK_CLASSES["many_shot"], "ManyShotJailbreakAttack")
+
     def test_multiple_attacks_yield_multiple_findings(self):
         from adapters.pyrit.parser import PyritReport, PyritResult
         report = PyritReport(attack="x", pyrit_version="0.14.0", seed=0,

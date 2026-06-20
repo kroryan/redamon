@@ -41,6 +41,25 @@
 .probeRow { display: flex; flex-wrap: wrap; gap: 14px; }
 .probe { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 
+/* Probe selection grid (name + description per family) */
+.probeToolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.probeCount { font-size: 12px; opacity: 0.7; margin-right: auto; }
+.probeToolBtn { font-size: 12px; padding: 3px 10px; border: 1px solid rgba(128,128,128,0.4); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.probeToolBtn:hover { background: rgba(128,128,128,0.12); }
+.probeGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+.probeCard { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid rgba(128,128,128,0.2); border-radius: 8px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.probeCard:hover { border-color: rgba(128,128,128,0.45); }
+.probeCardOn { border-color: rgba(59,130,246,0.6); background: rgba(59,130,246,0.06); }
+.probeCardOff { opacity: 0.5; cursor: not-allowed; }
+.probeCardOff input { cursor: not-allowed; }
+.probeBadge { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em;
+  color: #b45309; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.35);
+  border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+.probeCard input { margin-top: 3px; flex-shrink: 0; }
+.probeBody { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.probeName { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
+.probeDesc { font-size: 12px; opacity: 0.6; line-height: 1.35; }
+
 /* Custom (off-graph) target form */
 .customTag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid rgba(168,85,247,0.6); color: #a855f7; border-radius: 4px; padding: 0 5px; }
 .iconBtn { background: transparent; border: none; color: inherit; opacity: 0.5; cursor: pointer; margin-left: auto; }
@@ -65,6 +84,12 @@
 .boundsRow { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; }
 .boundsRow label { display: flex; flex-direction: column; font-size: 12px; opacity: 0.8; gap: 4px; }
 .boundsRow input { width: 110px; padding: 5px 8px; border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; background: transparent; color: inherit; }
+.purposeLabel { display: flex; flex-direction: column; gap: 4px; font-size: 12px; opacity: 0.85; margin: 4px 0 10px; }
+.purposeLabel em { opacity: 0.6; font-style: italic; }
+.purposeInput { width: 100%; padding: 6px 8px; border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; background: transparent; color: inherit; font: inherit; resize: vertical; }
+.strategyRow { display: flex; flex-wrap: wrap; gap: 6px; }
+.strategyChip { font-size: 12px; padding: 4px 10px; border: 1px solid rgba(128,128,128,0.35); border-radius: 999px; background: transparent; color: inherit; cursor: pointer; }
+.strategyChipOn { border-color: rgba(59,130,246,0.6); background: rgba(59,130,246,0.12); font-weight: 600; }
 .roe { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 8px 0; }
 
 .launchRow { display: flex; align-items: center; gap: 12px; margin-top: 12px; }

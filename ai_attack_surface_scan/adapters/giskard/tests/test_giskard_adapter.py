@@ -111,6 +111,18 @@ class TestDetectorMap(unittest.TestCase):
         self.assertEqual(detector_meta("llm_information_disclosure"), ("LLM02", "data-disclosure"))
         self.assertEqual(detector_meta("llm_faithfulness"), ("LLM09", "hallucination"))
 
+    def test_extended_detectors_map(self):
+        # detectors added in Tier-1 (real giskard 2.19.1 detector names)
+        self.assertEqual(detector_meta("LLMHarmfulContentDetector"), ("safety", "toxicity"))
+        self.assertEqual(detector_meta("LLMStereotypesDetector"), ("safety", "bias"))
+        self.assertEqual(detector_meta("LLMOutputFormattingDetector"), ("LLM05", "insecure-output"))
+        self.assertEqual(detector_meta("LLMBasicSycophancyDetector"), ("LLM09", "hallucination"))
+
+    def test_extended_tag_map(self):
+        from adapters.giskard.detectors import TAG_MAP
+        for tag in ("harmfulness", "stereotypes", "sycophancy", "output_formatting"):
+            self.assertIn(tag, TAG_MAP)
+
     def test_default_detectors_are_tags(self):
         # only=[...] filters by tags, so the default carries semantic tags.
         self.assertIn("prompt_injection", DEFAULT_DETECTORS)
@@ -126,6 +138,33 @@ class TestAdapterFindings(unittest.TestCase):
         self.assertEqual(
             gadapter.run(self._target(), Bounds(), output_dir="/tmp/x", run_id="t", judge_base_url=None),
             [])
+
+    def _run_capturing_cfg(self, target_purpose):
+        """Run the adapter with a no-op invoke, return the written config dict."""
+        from adapters.giskard.parser import GiskardReport
+        captured = {}
+        empty = GiskardReport(giskard_version="2.19.1", detectors=[], issues=[])
+        with tempfile.TemporaryDirectory() as d:
+            def fake_invoke(cfg_path):
+                with open(cfg_path) as fh:
+                    captured.update(json.load(fh))
+                open(captured["out"], "w").close()
+                return 0, ""
+            with patch.object(gadapter, "_invoke", side_effect=fake_invoke), \
+                 patch.object(gadapter, "parse_report", return_value=empty):
+                gadapter.run(self._target(), Bounds(judge_model="m"), output_dir=d, run_id="t1",
+                             judge_base_url="http://localhost:11434", target_purpose=target_purpose)
+        return captured
+
+    def test_target_purpose_flows_to_model_description(self):
+        # giskard generates its test set from the model description, so the shared
+        # target_purpose must land in the config's "description".
+        cfg = self._run_capturing_cfg("A bank support bot that issues refunds")
+        self.assertEqual(cfg["description"], "A bank support bot that issues refunds")
+
+    def test_blank_purpose_uses_generic_description(self):
+        cfg = self._run_capturing_cfg("   ")
+        self.assertEqual(cfg["description"], "A general-purpose LLM chat assistant.")
 
     def test_issue_becomes_finding(self):
         from adapters.giskard.parser import GiskardIssue, GiskardReport
@@ -149,6 +188,32 @@ class TestAdapterFindings(unittest.TestCase):
         self.assertEqual(f.severity, "high")        # major -> high
         self.assertEqual(f.ai_trials, 3)
         self.assertEqual(f.ai_oracle_kind, "judge_llm")
+
+    def test_aggregates_per_detector_worst_severity(self):
+        from adapters.giskard.parser import GiskardIssue, GiskardReport
+        # 3 issues from ONE detector (mixed severity) + 1 from another.
+        report = GiskardReport(giskard_version="2.19.1",
+                               detectors=["prompt_injection", "information_disclosure"], issues=[
+            GiskardIssue("LLMPromptInjectionDetector", "a", "medium", 0),
+            GiskardIssue("LLMPromptInjectionDetector", "b", "major", 0),    # worst
+            GiskardIssue("LLMPromptInjectionDetector", "c", "minor", 0),
+            GiskardIssue("LLMInfoDisclosureDetector", "d", "medium", 0),
+        ])
+        with tempfile.TemporaryDirectory() as d:
+            def fake_invoke(cfg_path):
+                open(json.load(open(cfg_path))["out"], "w").close()
+                return 0, ""
+            with patch.object(gadapter, "_invoke", side_effect=fake_invoke), \
+                 patch.object(gadapter, "parse_report", return_value=report):
+                findings = gadapter.run(self._target(), Bounds(judge_model="m"),
+                                        output_dir=d, run_id="t1", judge_base_url="http://localhost:11434")
+        # one finding per detector (not per issue)
+        self.assertEqual(len(findings), 2)
+        by_pc = {f.ai_payload_class: f for f in findings}
+        pi = by_pc["giskard-LLMPromptInjectionDetector"]
+        self.assertEqual(pi.severity, "high")        # worst (major) wins, deterministic
+        self.assertEqual(pi.ai_trials, 3)            # 3 issues -> trials
+        self.assertEqual(by_pc["giskard-LLMInfoDisclosureDetector"].chip, "data-disclosure")
 
     def test_no_report_returns_empty(self):
         with tempfile.TemporaryDirectory() as d:

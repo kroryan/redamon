@@ -171,6 +171,37 @@ class TestStartStop(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.status, AiAttackSurfaceStatus.ERROR)
         self.assertFalse(state.llm_leased)  # lease freed despite the failure
         self.mgr.local_llm_manager.release.assert_called_once()
+        # completed_at must be set so the status GC can evict this errored run
+        # (otherwise it leaks in ai_attack_states forever).
+        self.assertIsNotNone(state.completed_at)
+
+    async def test_cleanup_stops_running_ai_attack_containers(self):
+        # cleanup() (orchestrator shutdown) must stop in-flight AI-attack scans,
+        # not just the other scanner types — else the container orphans.
+        state = await self._start()
+        run_id = state.run_id
+        self.mgr.client.containers.get.return_value = fake_container(status="running")
+        await self.mgr.cleanup()
+        self.assertNotIn(run_id, self.mgr.ai_attack_states.get("p", {}))
+        self.assertFalse(state.llm_leased)   # judge lease released on cleanup
+
+    async def test_config_filename_sanitizes_project_id(self):
+        # A project_id with path chars must not escape /tmp/redamon.
+        state = await self.mgr.start_ai_attack_surface(
+            project_id="p/../x", user_id="u", webapp_api_url="",
+            run_config={"tool": "skeleton", "bounds": {}, "roe_confirmed": True},
+            ai_attack_path="/host/ai_attack_surface_scan")
+        cfg = self.mgr.client.containers.run.call_args.kwargs["environment"]["AI_ATTACK_CONFIG"]
+        self.assertTrue(cfg.startswith("/tmp/redamon/ai_attack_"))
+        # The real safety property: no '/' in the filename portion, so it can't
+        # escape /tmp/redamon (a literal '..' mid-filename is harmless without a
+        # surrounding separator). And the env path must equal the file we write.
+        self.assertNotIn("/", cfg[len("/tmp/redamon/"):])
+        # cleanup the sanitized file
+        try:
+            Path(cfg).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     async def test_stop_releases_lease_and_clears_state(self):
         state = await self._start()

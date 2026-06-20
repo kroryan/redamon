@@ -18,11 +18,16 @@ from __future__ import annotations
 # the MVP default (LLM-judge based, no embedding model needed).
 DEFAULT_DETECTORS = ["prompt_injection", "information_disclosure"]
 
-# tag -> (owasp, chip) for UI / catalog display
+# tag (giskard.scan only=...) -> (owasp, chip) for UI / catalog display.
+# All verified against giskard 2.19.1's DetectorRegistry._tags.
 TAG_MAP: dict[str, tuple[str, str]] = {
     "prompt_injection": ("LLM01", "prompt-injection"),
     "information_disclosure": ("LLM02", "data-disclosure"),
     "hallucination": ("LLM09", "hallucination"),
+    "sycophancy": ("LLM09", "hallucination"),
+    "harmfulness": ("safety", "toxicity"),
+    "stereotypes": ("safety", "bias"),
+    "output_formatting": ("LLM05", "insecure-output"),
 }
 
 
@@ -31,6 +36,12 @@ def detector_meta(detector_name: str) -> tuple[str, str]:
     d = (detector_name or "").lower()
     if "disclosure" in d:
         return ("LLM02", "data-disclosure")
+    if "harmful" in d:
+        return ("safety", "toxicity")
+    if "stereotype" in d or "discrimination" in d or "bias" in d:
+        return ("safety", "bias")
+    if "formatting" in d or "output_format" in d:
+        return ("LLM05", "insecure-output")
     if "injection" in d or "jailbreak" in d:
         return ("LLM01", "prompt-injection")
     if any(x in d for x in ("hallucination", "faithfulness", "implausible", "sycophancy", "misinformation")):

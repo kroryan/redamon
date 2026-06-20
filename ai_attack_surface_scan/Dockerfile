@@ -40,6 +40,25 @@ RUN python -m venv /opt/venv-giskard \
     && /opt/venv-giskard/bin/pip install --no-cache-dir -U pip \
     && /opt/venv-giskard/bin/pip install --no-cache-dir -r /tmp/giskard-requirements.txt
 
+# --- promptfoo (Node CLI; NOT a venv) ---
+# First non-Python tool. Install Node 22 + the pinned promptfoo. The dataset-based
+# red-team plugins (our defaults) pull their payloads from HuggingFace
+# (datasets-server) at scan time -- promptfoo does NOT persist that dataset to a
+# disk cache, so there is nothing to pre-warm into the image; the scan container
+# live-fetches at runtime (it is spawned on the host network and has the egress).
+# Grading is forced to the local Ollama, so there is zero egress to OpenAI or
+# promptfoo-cloud (see adapters/promptfoo/TOOL_API.md §8).
+ENV PROMPTFOO_VERSION=0.121.17
+ENV PROMPTFOO_BIN=promptfoo
+ENV PROMPTFOO_DISABLE_TELEMETRY=true \
+    PROMPTFOO_DISABLE_UPDATE=true \
+    PROMPTFOO_DISABLE_REDTEAM_REMOTE_GENERATION=true
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g "promptfoo@${PROMPTFOO_VERSION}" \
+    && rm -rf /var/lib/apt/lists/* /root/.npm
+
 # Copy the scanner (spine + adapters). The runner scripts are invoked by their
 # tool's venv; the spine runs in the base interpreter.
 COPY ai_attack_surface_scan/ ./ai_attack_surface_scan/

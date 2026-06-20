@@ -6,6 +6,8 @@
 import prisma from '@/lib/prisma'
 import { getSession } from '@/app/api/graph/neo4j'
 import type { Project, Remediation } from '@prisma/client'
+import { corroborateAttackFindings } from './aiAttackFindings'
+import type { AiAttackFindingRecord, RawAttackRow } from './aiAttackFindings'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -116,6 +118,10 @@ export interface AiSurfaceRecord {
   promptInjectableParams: string[]  // names of params with is_ai_prompt_injectable=true
   hasPromptParams: boolean
 }
+
+// Cross-tool corroboration lives in a dependency-free module so it is unit-
+// testable without the DB layer (§9). Re-exported for existing consumers.
+export type { AiAttackFindingRecord, RawAttackRow }
 
 export interface JsReconFindingRecord {
   findingType: string
@@ -310,6 +316,10 @@ export interface ReportData {
     modelFamilies: string[]
     byInterfaceType: { interfaceType: string; count: number }[]
     findings: AiSurfaceRecord[]
+    // AI Attack Surface (garak/pyrit/giskard/promptfoo) — CONFIRMED tested vulns,
+    // corroborated across tools (§9). Empty until an attack scan has run.
+    attackFindings: AiAttackFindingRecord[]
+    attackToolsRun: string[]   // distinct tools that produced findings
   }
 
   // OTX Threat Intelligence
@@ -518,12 +528,20 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
     // and prompt-injectable parameters each add a flat weight. Conservative
     // weights — these are *discovery* findings (a surface exists), not
     // confirmed vulns. Calibrated to match injectableScore (25/param).
+    // Confirmed AI Attack Surface findings carry the most weight: unlike recon
+    // signals (surface that *might* be exploitable), these are vulns a tool
+    // actually demonstrated. high/critical count for more, ASR amplifies.
+    const aiAttackScore = aiSurfaceData.attackFindings.reduce((s, f) => {
+      const base = (f.severity === 'critical' || f.severity === 'high') ? 35 : 18
+      return s + base + Math.round((f.maxAsr ?? 0) * 15)
+    }, 0)
     const aiSurfaceScore =
       aiSurfaceData.totalAiEndpoints * 5
       + aiSurfaceData.ragIngestEndpoints * 15
       + aiSurfaceData.promptInjectableParams * 25
       + aiSurfaceData.mcpPoisoningFindings * 30
       + aiSurfaceData.vectorDbs * 15
+      + aiAttackScore
     const rawRisk = vulnScore + cveScore + gvmExploitScore + kevScore
       + chainExploitScore + chainFindingsScore + capecScore
       + secretsScore + sensitiveFilesScore + injectableScore
@@ -1499,6 +1517,47 @@ async function queryAiSurface(session: any, pid: string) {
   )
   const modelFamilies = famRes.records.map((r: { get(k: string): unknown }) => r.get('fam') as string).filter(Boolean)
 
+  // AI Attack Surface findings (garak/pyrit/giskard/promptfoo): the normalized
+  // Vulnerability nodes written by the attack tools. Pulled raw, then corroborated
+  // across tools by (OWASP-LLM id, target) into one row per confirmed vuln (§9).
+  const num = (v: unknown): number | null => {
+    if (v == null) return null
+    if (typeof v === 'number') return v
+    const o = v as { toNumber?: () => number; low?: number }
+    return o.toNumber?.() ?? o.low ?? null
+  }
+  const attackRes = await session.run(
+    `MATCH (v:Vulnerability {project_id: $pid})
+     WHERE v.source IN ['garak', 'pyrit', 'giskard', 'promptfoo']
+     OPTIONAL MATCH (parent)-[:HAS_VULNERABILITY]->(v)
+     WITH v, parent
+     RETURN v.source AS source, v.severity AS severity, v.type AS type,
+            v.ai_owasp_llm_id AS owaspLlmId, v.ai_asr AS asr, v.ai_trials AS trials,
+            v.ai_payload_class AS payloadClass, v.ai_transcript_ref AS transcriptRef,
+            v.evidence AS evidence, v.ai_probe_pack_version AS probePackVersion,
+            coalesce(parent.baseurl, parent.url, parent.name, v.ai_target_url) AS target,
+            parent.path AS endpointPath
+     ORDER BY v.ai_asr DESC
+     LIMIT 2000`,
+    { pid }
+  )
+  const rawAttack: RawAttackRow[] = attackRes.records.map((r: { get(k: string): unknown }) => ({
+    source: (r.get('source') as string) || '',
+    severity: (r.get('severity') as string) || 'info',
+    type: (r.get('type') as string) || null,
+    owaspLlmId: (r.get('owaspLlmId') as string) || null,
+    asr: num(r.get('asr')),
+    trials: num(r.get('trials')),
+    payloadClass: (r.get('payloadClass') as string) || null,
+    transcriptRef: (r.get('transcriptRef') as string) || null,
+    evidence: (r.get('evidence') as string) || null,
+    probePackVersion: (r.get('probePackVersion') as string) || null,
+    target: (r.get('target') as string) || null,
+    endpointPath: (r.get('endpointPath') as string) || null,
+  }))
+  const attackFindings = corroborateAttackFindings(rawAttack)
+  const attackToolsRun = [...new Set(rawAttack.map(r => r.source).filter(Boolean))].sort()
+
   return {
     totalAiEndpoints,
     ragIngestEndpoints,
@@ -1509,6 +1568,8 @@ async function queryAiSurface(session: any, pid: string) {
     modelFamilies,
     byInterfaceType,
     findings,
+    attackFindings,
+    attackToolsRun,
   }
 }
 

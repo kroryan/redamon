@@ -510,7 +510,8 @@ function renderTOC(data: ReportData): string {
     dynamicSections.push({ id: 'vhost-sni', label: 'VHost & SNI Enumeration' })
   }
   if (data.aiSurface.totalAiEndpoints > 0 || data.aiSurface.ragIngestEndpoints > 0 || data.aiSurface.promptInjectableParams > 0
-      || data.aiSurface.mcpServers > 0 || data.aiSurface.mcpPoisoningFindings > 0 || data.aiSurface.vectorDbs > 0) {
+      || data.aiSurface.mcpServers > 0 || data.aiSurface.mcpPoisoningFindings > 0 || data.aiSurface.vectorDbs > 0
+      || (data.aiSurface.attackFindings?.length ?? 0) > 0) {
     dynamicSections.push({ id: 'ai-surface', label: 'AI Surface' })
   }
   if (data.otx.totalPulses > 0 || data.otx.totalMalware > 0) {
@@ -1354,21 +1355,25 @@ function renderVhostSni(data: ReportData): string {
 function renderAiSurface(data: ReportData): string {
   const ai = data.aiSurface
   if (ai.totalAiEndpoints === 0 && ai.ragIngestEndpoints === 0 && ai.promptInjectableParams === 0
-      && ai.mcpServers === 0 && ai.mcpPoisoningFindings === 0 && ai.vectorDbs === 0) return ''
+      && ai.mcpServers === 0 && ai.mcpPoisoningFindings === 0 && ai.vectorDbs === 0
+      && (ai.attackFindings?.length ?? 0) === 0) return ''
 
   const typeRows = ai.byInterfaceType.map(t =>
-    `<tr><td>${t.interfaceType}</td><td style="text-align: right">${t.count}</td></tr>`
+    `<tr><td>${esc(t.interfaceType)}</td><td style="text-align: right">${t.count}</td></tr>`
   ).join('\n')
 
   const findingRows = ai.findings.map(f => {
+    // baseUrl/path/param-names come from crawling attacker-controlled targets and
+    // can contain markup — escape every interpolated value (stored-XSS guard).
+    const params = f.promptInjectableParams.slice(0, 4).map(esc).join(', ')
     const promptParamsLabel = f.hasPromptParams
-      ? `<span style="color: #ef4444; font-weight: 600">${f.promptInjectableParams.length}</span> (${f.promptInjectableParams.slice(0, 4).join(', ')}${f.promptInjectableParams.length > 4 ? ', ...' : ''})`
+      ? `<span style="color: #ef4444; font-weight: 600">${f.promptInjectableParams.length}</span> (${params}${f.promptInjectableParams.length > 4 ? ', ...' : ''})`
       : '—'
     const rag = f.isRagIngest ? '<span style="color: #f59e0b; font-weight: 600">yes</span>' : '—'
     return `<tr>
-      <td><code>${f.baseUrl}</code></td>
-      <td><code>${f.path}</code></td>
-      <td>${f.interfaceType}</td>
+      <td><code>${esc(f.baseUrl)}</code></td>
+      <td><code>${esc(f.path)}</code></td>
+      <td>${esc(f.interfaceType)}</td>
       <td style="text-align: center">${rag}</td>
       <td>${promptParamsLabel}</td>
     </tr>`
@@ -1393,7 +1398,7 @@ function renderAiSurface(data: ReportData): string {
     <div class="kpi"><div class="kpi-value">${ai.vectorDbs}</div><div class="kpi-label">Vector DBs</div></div>
   </div>
 
-  ${ai.modelFamilies.length ? `<p><strong>Model families detected:</strong> ${ai.modelFamilies.map(f => `<code>${f}</code>`).join(', ')}</p>` : ''}
+  ${ai.modelFamilies.length ? `<p><strong>Model families detected:</strong> ${ai.modelFamilies.map(f => `<code>${esc(f)}</code>`).join(', ')}</p>` : ''}
 
   ${typeRows ? `<h3>Distribution by Interface Type</h3>
   <table><thead><tr><th>Interface Type</th><th style="text-align: right">Endpoints</th></tr></thead>
@@ -1404,7 +1409,49 @@ function renderAiSurface(data: ReportData): string {
     <th>Base URL</th><th>Path</th><th>Type</th><th>RAG</th><th>Prompt-Injectable Params</th>
   </tr></thead>
   <tbody>${findingRows}</tbody></table>` : ''}
+
+  ${renderAiAttackFindings(ai)}
 </section>`
+}
+
+// Confirmed AI Attack Surface findings (garak/pyrit/giskard/promptfoo), corroborated
+// across tools and grouped by OWASP-LLM id + target (§9). Distinct from the recon
+// table above: these are vulns a tool actually demonstrated, with an attack-success
+// rate and a drill-down transcript path.
+function renderAiAttackFindings(ai: ReportData['aiSurface']): string {
+  if (!ai.attackFindings?.length) return ''
+  const toolsRun = ai.attackToolsRun ?? []
+  const pct = (n: number | null) => (n == null ? '—' : `${Math.round(n * 100)}%`)
+  const sevColor: Record<string, string> = {
+    critical: '#b91c1c', high: '#ef4444', medium: '#f59e0b', low: '#10b981', info: '#6b7280',
+  }
+  const rows = ai.attackFindings.map(f => {
+    const corrob = f.sources.length > 1
+      ? `<span style="color:#b91c1c;font-weight:600" title="corroborated by ${f.sources.length} tools">${esc(f.sources.join(' + '))}</span>`
+      : esc(f.sources.join(', '))
+    return `<tr>
+      <td><code>${esc(f.owaspLlmId)}</code></td>
+      <td>${esc(f.attackChip)}</td>
+      <td><code>${esc(f.target)}</code>${f.endpointPath ? `<code>${esc(f.endpointPath)}</code>` : ''}</td>
+      <td>${corrob}</td>
+      <td style="text-align:right;font-weight:600">${pct(f.maxAsr)}</td>
+      <td style="text-align:right">${f.totalTrials}</td>
+      <td><span style="color:${sevColor[f.severity] || '#6b7280'};font-weight:600">${esc(f.severity)}</span></td>
+      <td style="font-size:11px">${esc((f.evidence || '').slice(0, 120))}</td>
+    </tr>`
+  }).join('\n')
+  const corroborated = ai.attackFindings.filter(f => f.sources.length > 1).length
+  return `<h3>Tested Vulnerabilities — AI Attack Surface</h3>
+  <p class="lead" style="font-size:13px">
+    Confirmed by deterministic offensive testing (<strong>${esc(toolsRun.join(', '))}</strong>),
+    grouped by OWASP-LLM id and target. ASR = attack-success rate over trials.
+    ${corroborated > 0 ? `<strong>${corroborated}</strong> finding(s) corroborated by more than one tool.` : ''}
+  </p>
+  <table><thead><tr>
+    <th>OWASP-LLM</th><th>Attack</th><th>Target</th><th>Found by</th>
+    <th style="text-align:right">ASR</th><th style="text-align:right">Trials</th><th>Severity</th><th>Evidence</th>
+  </tr></thead>
+  <tbody>${rows}</tbody></table>`
 }
 
 

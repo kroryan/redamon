@@ -144,6 +144,56 @@ class TestRunToolDispatch(unittest.TestCase):
         self.assertEqual(captured["auth_header"], "Authorization")
         self.assertEqual(captured["api_key"], "tok")
 
+    def test_giskard_dispatch_isolates_and_passes_detectors(self):
+        from normalizer import Finding
+        t_bad = tl.Target(baseurl="http://a", path="/c")
+        t_ok = tl.Target(baseurl="http://b", path="/c")
+        captured = {}
+
+        def fake_run(target, bounds, output_dir, run_id, **k):
+            if target.baseurl == "http://a":
+                raise RuntimeError("giskard boom")
+            captured.update(k)
+            return [Finding(source="giskard", chip="prompt-injection", name="n", baseurl="http://b",
+                            path="/c", ai_owasp_llm_id="LLM01", ai_payload_class="giskard-x")]
+
+        cfg = _cfg(tool="giskard")
+        cfg.probes = ["prompt_injection"]
+        cfg.judge_base_url = "http://localhost:11434"
+        with patch("adapters.giskard.run", side_effect=fake_run):
+            findings = main.run_tool(cfg, [t_bad, t_ok])
+        self.assertEqual(len(findings), 1)            # bad target isolated
+        self.assertEqual(findings[0].source, "giskard")
+        self.assertEqual(captured["detectors"], ["prompt_injection"])
+        self.assertEqual(captured["judge_base_url"], "http://localhost:11434")
+
+    def test_promptfoo_dispatch_isolates_and_passes_plugins(self):
+        from normalizer import Finding
+        t_bad = tl.Target(baseurl="http://a", path="/c")
+        t_ok = tl.Target(baseurl="http://b", path="/c")
+        captured = {}
+
+        def fake_run(target, bounds, output_dir, run_id, **k):
+            if target.baseurl == "http://a":
+                raise RuntimeError("promptfoo boom")
+            captured.update(k)
+            return [Finding(source="promptfoo", chip="toxicity", name="n", baseurl="http://b",
+                            path="/c", ai_owasp_llm_id="safety", ai_payload_class="promptfoo-beavertails")]
+
+        cfg = _cfg(tool="promptfoo")
+        cfg.probes = ["beavertails"]
+        cfg.judge_base_url = "http://localhost:11434"
+        cfg.auth_header = "Authorization"
+        cfg.auth_scheme = "Bearer"
+        cfg.api_key = "tok"
+        with patch("adapters.promptfoo.run", side_effect=fake_run):
+            findings = main.run_tool(cfg, [t_bad, t_ok])
+        self.assertEqual(len(findings), 1)            # bad target isolated
+        self.assertEqual(findings[0].source, "promptfoo")
+        self.assertEqual(captured["plugins"], ["beavertails"])
+        self.assertEqual(captured["judge_base_url"], "http://localhost:11434")
+        self.assertEqual(captured["api_key"], "tok")
+
     def test_garak_passes_probes_and_judge_through(self):
         from normalizer import Finding
         captured = {}

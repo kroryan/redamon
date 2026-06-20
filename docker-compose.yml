@@ -609,6 +609,9 @@ services:
       - ./gvm_scan/output:/data/gvm-output:ro
       - ./github_secret_hunt/output:/data/github-hunt-output:ro
       - ./trufflehog_scan/output:/data/trufflehog-output:ro
+      # AI Attack Surface native reports (garak/pyrit/giskard/promptfoo) for the
+      # transcript drill-down (§9c). Read-only; served via a path-validated route.
+      - ./ai_attack_surface_scan/output:/data/ai-attack-output:ro
       - report_data:/data/reports
       - js_recon_uploads:/data/js-recon-uploads
       - js_recon_custom:/data/js-recon-custom

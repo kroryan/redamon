@@ -278,7 +278,13 @@ class AiAttackSurfaceStartRequest(BaseModel):
     roe_confirmed: bool = False                # a launch is a confirmed action (§10)
     dry_run: bool = False
     probes: list[str] = []                     # per-tool probe/plugin selection (garak families, etc.)
+    strategies: list[str] = []                 # promptfoo: payload-mutation strategies (base64/rot13/...)
+    objective: str = ""                        # pyrit: optional custom attack objective (the harmful goal)
     target_model: str = ""                     # model id the target serves (else derived from recon)
+    # Free-text description of what the target app does. Shared across tools that
+    # generate/grade attacks from app context (giskard description, promptfoo
+    # redteam.purpose, pyrit objective framing). Empty -> a generic default.
+    target_purpose: str = ""
     # Target authentication (shared across tools): the secret + the header that
     # carries it + an optional scheme prefix (e.g. "Bearer").
     api_key: str = ""

@@ -608,6 +608,14 @@ class ContainerManager:
                 await self.stop_trufflehog(project_id, timeout=5)
             except Exception as e:
                 logger.error(f"Error cleaning up TruffleHog {project_id}: {e}")
+        # AI Attack Surface scan containers are spawned per-run; stop them too,
+        # otherwise they orphan on orchestrator shutdown (and keep the judge lease).
+        for project_id, runs in list(self.ai_attack_states.items()):
+            for run_id in list(runs.keys()):
+                try:
+                    await self.stop_ai_attack_surface(project_id, run_id, timeout=5)
+                except Exception as e:
+                    logger.error(f"Error cleaning up AI attack {project_id}/{run_id}: {e}")
 
     # =========================================================================
     # Partial Recon Container Lifecycle
@@ -1038,7 +1046,9 @@ class ContainerManager:
         runs = self.ai_attack_states.get(project_id, {})
         state = runs.get(run_id)
         if state:
-            self._refresh_ai_attack_state(state)
+            # _refresh does blocking Docker calls (container.stop/remove on the
+            # release path) — keep them off the event loop.
+            await asyncio.to_thread(self._refresh_ai_attack_state, state)
             return state
         return AiAttackSurfaceState(
             project_id=project_id, run_id=run_id, status=AiAttackSurfaceStatus.IDLE,
@@ -1048,7 +1058,7 @@ class ContainerManager:
         runs = self.ai_attack_states.get(project_id, {})
         to_remove = []
         for run_id, state in runs.items():
-            self._refresh_ai_attack_state(state)
+            await asyncio.to_thread(self._refresh_ai_attack_state, state)
             if state.status in (AiAttackSurfaceStatus.COMPLETED, AiAttackSurfaceStatus.ERROR):
                 if state.completed_at and (datetime.now(timezone.utc) - state.completed_at).total_seconds() > 60:
                     to_remove.append(run_id)
@@ -1092,6 +1102,7 @@ class ContainerManager:
             started_at=datetime.now(timezone.utc),
         )
         self.ai_attack_states.setdefault(project_id, {})[run_id] = state
+        config_path = None   # set once written; may be None if we fail before that
 
         try:
             # Ensure the scanner image exists.
@@ -1123,7 +1134,10 @@ class ContainerManager:
             # Write the run config to the shared /tmp/redamon volume.
             config_dir = Path("/tmp/redamon")
             config_dir.mkdir(parents=True, exist_ok=True)
-            config_path = config_dir / f"ai_attack_{project_id}_{run_id}.json"
+            # Sanitize project_id for the filename (it's client-supplied via the
+            # path param); run_id is a server UUID. Mirrors the container-name rule.
+            safe_pid = re.sub(r'[^a-zA-Z0-9_.-]', '_', project_id)
+            config_path = config_dir / f"ai_attack_{safe_pid}_{run_id}.json"
             run_config.setdefault("project_id", project_id)
             run_config.setdefault("user_id", user_id)
             run_config.setdefault("run_id", run_id)
@@ -1140,7 +1154,7 @@ class ContainerManager:
                     "USER_ID": user_id,
                     "WEBAPP_API_URL": webapp_api_url,
                     "PYTHONUNBUFFERED": "1",
-                    "AI_ATTACK_CONFIG": f"/tmp/redamon/ai_attack_{project_id}_{run_id}.json",
+                    "AI_ATTACK_CONFIG": str(config_path),
                     "AI_ATTACK_RUN_ID": run_id,
                     "AI_ATTACK_TOOL": tool,
                     "NEO4J_URI": os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
@@ -1165,11 +1179,15 @@ class ContainerManager:
         except Exception as e:
             state.status = AiAttackSurfaceStatus.ERROR
             state.error = str(e)
+            # Mark completion so the status GC can evict this run (else it leaks in
+            # ai_attack_states forever — the GC only removes runs with completed_at).
+            state.completed_at = datetime.now(timezone.utc)
             # Don't leak the judge lease if the spawn failed after ensure_up.
             self._release_llm(state)
             # Don't leave the config file behind on a failed spawn.
             try:
-                Path(f"/tmp/redamon/ai_attack_{project_id}_{run_id}.json").unlink(missing_ok=True)
+                if config_path:
+                    config_path.unlink(missing_ok=True)
             except Exception:
                 pass
             logger.error(f"Failed to start AI attack surface for {project_id}/{run_id}: {e}")

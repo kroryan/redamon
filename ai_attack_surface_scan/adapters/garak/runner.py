@@ -37,16 +37,17 @@ def run_garak_scan(
         "--parallel_attempts", "8",
     ]
 
-    env = dict(os.environ)
+    # Egress guard: never inherit a hosted OPENAI_API_KEY (parity with giskard +
+    # promptfoo). A stray key would let garak's judge-based detectors egress to
+    # api.openai.com. We FORCE the local Ollama endpoint when a judge is set.
+    env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}
     if api_key:
         env["REST_API_KEY"] = api_key
-    # Judge-based detectors (if any) use the OpenAI client; point it at the local
-    # Ollama OpenAI-compat endpoint so nothing egresses to a hosted model.
     if judge_base_url:
         base = judge_base_url.rstrip("/")
-        env.setdefault("OPENAI_API_BASE", base + "/v1")
-        env.setdefault("OPENAI_BASE_URL", base + "/v1")
-        env.setdefault("OPENAI_API_KEY", "ollama-local")
+        env["OPENAI_API_BASE"] = base + "/v1"
+        env["OPENAI_BASE_URL"] = base + "/v1"
+        env["OPENAI_API_KEY"] = "ollama-local"
 
     logger.info(f"Running garak: {' '.join(cmd)}")
     try:
