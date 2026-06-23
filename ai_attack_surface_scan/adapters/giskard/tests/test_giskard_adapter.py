@@ -145,7 +145,7 @@ class TestAdapterFindings(unittest.TestCase):
         captured = {}
         empty = GiskardReport(giskard_version="2.19.1", detectors=[], issues=[])
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(cfg_path):
+            def fake_invoke(cfg_path, **_):
                 with open(cfg_path) as fh:
                     captured.update(json.load(fh))
                 open(captured["out"], "w").close()
@@ -172,7 +172,7 @@ class TestAdapterFindings(unittest.TestCase):
             GiskardIssue("llm_prompt_injection", "injection works", "major", 3),
         ])
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(cfg_path):
+            def fake_invoke(cfg_path, **_):
                 open(json.load(open(cfg_path))["out"], "w").close()
                 return 0, ""
             with patch.object(gadapter, "_invoke", side_effect=fake_invoke), \
@@ -200,7 +200,7 @@ class TestAdapterFindings(unittest.TestCase):
             GiskardIssue("LLMInfoDisclosureDetector", "d", "medium", 0),
         ])
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(cfg_path):
+            def fake_invoke(cfg_path, **_):
                 open(json.load(open(cfg_path))["out"], "w").close()
                 return 0, ""
             with patch.object(gadapter, "_invoke", side_effect=fake_invoke), \
@@ -231,6 +231,11 @@ class TestAdapterFindings(unittest.TestCase):
             gadapter._invoke("/tmp/cfg.json")
             captured = mrun.call_args.kwargs["env"]
         self.assertNotIn("OPENAI_API_KEY", captured)
+
+    def test_invoke_passes_timeout_to_run_streamed(self):
+        with patch.object(gadapter, "run_streamed", return_value=(0, "")) as mrun:
+            gadapter._invoke("/tmp/cfg.json", timeout=1234)
+        self.assertEqual(mrun.call_args.kwargs["timeout"], 1234)
 
 
 if __name__ == "__main__":

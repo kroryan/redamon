@@ -24,7 +24,7 @@ export interface LaunchTarget {
 export interface LaunchPayload {
   tool: string
   targets: LaunchTarget[]
-  bounds: { trials?: number; asr_threshold?: number; judge_model?: string; max_turns?: number; seed?: number; parallelism?: number }
+  bounds: { trials?: number; asr_threshold?: number; judge_model?: string; max_turns?: number; seed?: number; parallelism?: number; timeout?: number }
   roe_confirmed: boolean
   dry_run?: boolean
   probes?: string[]

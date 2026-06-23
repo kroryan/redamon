@@ -47,6 +47,9 @@ export default function AiAttackSurfacePage() {
   // Concurrent requests per tool (garak --parallel_attempts / promptfoo eval
   // concurrency). Default 2 — safe for a slow/CPU target; raise for GPU.
   const [parallelism, setParallelism] = useState(2)
+  // Hard wall-clock budget for the whole tool run, in MINUTES. Default 600 (10h)
+  // — big multi-family sweeps + slow probes need room before they're killed.
+  const [timeoutMin, setTimeoutMin] = useState(600)
   const [roeConfirmed, setRoeConfirmed] = useState(false)
   // Shared: free-text description of the target app. Lifts giskard/promptfoo/pyrit.
   const [targetPurpose, setTargetPurpose] = useState('')
@@ -158,7 +161,7 @@ export default function AiAttackSurfacePage() {
     await s.launch({
       tool: openCard.id,
       targets: [...graphTargets, ...custom],
-      bounds: { trials, asr_threshold: asrThreshold, judge_model: judgeModel, max_turns: maxTurns, seed, parallelism },
+      bounds: { trials, asr_threshold: asrThreshold, judge_model: judgeModel, max_turns: maxTurns, seed, parallelism, timeout: timeoutMin * 60 },
       roe_confirmed: roeConfirmed,
       probes: Array.from(selectedProbes),
       strategies: openCard.id === 'promptfoo' ? Array.from(selectedStrategies) : undefined,
@@ -399,6 +402,9 @@ export default function AiAttackSurfacePage() {
               <label title="How many requests are fired at the target at once. Keep low (2) for a slow/CPU target so its queue doesn't time out; raise it for a fast/GPU target.">
                 Parallel<input type="number" min={1} max={16} value={parallelism}
                      onChange={(e) => setParallelism(Math.max(1, Math.min(16, parseInt(e.target.value) || 1)))} /></label>
+              <label title="Hard time budget for the whole run, in minutes. When exceeded the tool is killed (any work done is kept). Default 600 (10h) — big multi-family sweeps and slow probes (atkgen) need room.">
+                Timeout (min)<input type="number" min={1} max={1440} value={timeoutMin}
+                     onChange={(e) => setTimeoutMin(Math.max(1, Math.min(1440, parseInt(e.target.value) || 1)))} /></label>
             </div>
 
             {/* promptfoo: payload-mutation strategies (local, zero-egress). */}

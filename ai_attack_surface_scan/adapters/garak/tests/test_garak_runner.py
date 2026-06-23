@@ -43,6 +43,12 @@ class TestCommandConstruction(unittest.TestCase):
         cmd = mrun.call_args.args[0]
         self.assertEqual(cmd[cmd.index("--parallel_attempts") + 1], "2")
 
+    def test_timeout_flows_to_run_streamed(self):
+        with patch.object(runner, "run_streamed") as mrun:
+            mrun.return_value = (0, "")
+            run_garak_scan("/c.json", ["dan"], 1, 0, "/out/g", timeout=1234)
+        self.assertEqual(mrun.call_args.kwargs["timeout"], 1234)
+
     def test_no_key_no_rest_api_key_env(self):
         with patch.object(runner, "run_streamed") as mrun:
             mrun.return_value = (0, "")

@@ -24,7 +24,7 @@ from .plugins import (DEFAULT_PLUGINS, DEFAULT_STRATEGIES, LOCAL_STRATEGIES,
 logger = logging.getLogger("ai-attack-surface")
 
 PROMPTFOO_BIN = os.environ.get("PROMPTFOO_BIN", "promptfoo")
-DEFAULT_TIMEOUT = int(os.environ.get("AI_ATTACK_PROMPTFOO_TIMEOUT", "3600"))
+DEFAULT_TIMEOUT = int(os.environ.get("AI_ATTACK_PROMPTFOO_TIMEOUT", "36000"))
 DEFAULT_NUM_TESTS = int(os.environ.get("AI_ATTACK_PROMPTFOO_NUMTESTS", "5"))
 
 # Zero-egress env (TOOL_API.md §8.6): no remote generation, no telemetry/update.
@@ -110,7 +110,8 @@ def run(target, bounds, output_dir: str, run_id: str,
     cfg_path.write_text(json.dumps(cfg, indent=2))
 
     rc, tail = _invoke(cfg_path, gen_path, results_path, api_key,
-                       parallel_attempts=max(1, int(getattr(bounds, "parallelism", 2) or 2)))
+                       parallel_attempts=max(1, int(getattr(bounds, "parallelism", 2) or 2)),
+                       timeout=int(getattr(bounds, "timeout", 0) or DEFAULT_TIMEOUT))
     if not os.path.exists(results_path):
         logger.warning(f"promptfoo produced no results (rc={rc}); tail:\n{tail}")
         return []
@@ -151,11 +152,13 @@ def run(target, bounds, output_dir: str, run_id: str,
     return findings
 
 
-def _invoke(cfg_path, gen_path, results_path, api_key, parallel_attempts=2):
+def _invoke(cfg_path, gen_path, results_path, api_key, parallel_attempts=2,
+            timeout=DEFAULT_TIMEOUT):
     """Run the promptfoo 2-step. Returns (rc, log tail). Failure-soft.
 
     `parallel_attempts` caps how many test cases eval runs concurrently against
-    the target (promptfoo -j) — keep it low for a slow/CPU target."""
+    the target (promptfoo -j) — keep it low for a slow/CPU target. `timeout` is
+    the wall-clock budget applied to each step (generate + eval)."""
     env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}
     env.update(_OFFLINE_ENV)
     if api_key:
@@ -167,8 +170,8 @@ def _invoke(cfg_path, gen_path, results_path, api_key, parallel_attempts=2):
     ev = [PROMPTFOO_BIN, "eval", "-c", str(gen_path), "-o", str(results_path),
           "--no-table", "--no-progress-bar", "-j", str(max(1, int(parallel_attempts)))]
     logger.info(f"Running promptfoo generate: {' '.join(gen)}")
-    rc1, tail1 = run_streamed(gen, env=env, timeout=DEFAULT_TIMEOUT, tag="promptfoo:gen")
+    rc1, tail1 = run_streamed(gen, env=env, timeout=timeout, tag="promptfoo:gen")
     if not os.path.exists(gen_path):
         return rc1, tail1
     logger.info(f"Running promptfoo eval: {' '.join(ev)}")
-    return run_streamed(ev, env=env, timeout=DEFAULT_TIMEOUT, tag="promptfoo:eval")
+    return run_streamed(ev, env=env, timeout=timeout, tag="promptfoo:eval")

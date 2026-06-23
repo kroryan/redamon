@@ -21,7 +21,7 @@ logger = logging.getLogger("ai-attack-surface")
 # pyrit lives in its own venv (datasets pin conflicts with garak).
 PYRIT_PYTHON = os.environ.get("PYRIT_PYTHON", "python")
 RUNNER = os.path.join(os.path.dirname(__file__), "pyrit_run.py")
-DEFAULT_TIMEOUT = int(os.environ.get("AI_ATTACK_PYRIT_TIMEOUT", "3600"))
+DEFAULT_TIMEOUT = int(os.environ.get("AI_ATTACK_PYRIT_TIMEOUT", "36000"))
 DEFAULT_SEED = int(os.environ.get("AI_ATTACK_PYRIT_SEED", "0"))
 
 
@@ -95,7 +95,7 @@ def run(target, bounds, output_dir: str, run_id: str,
         cfg_path = out / f"pyrit_{attack}_config.json"
         cfg_path.write_text(json.dumps(cfg, indent=2))
 
-        rc, tail = _invoke(cfg_path)
+        rc, tail = _invoke(cfg_path, timeout=int(getattr(bounds, "timeout", 0) or DEFAULT_TIMEOUT))
         if not os.path.exists(cfg["out"]):
             logger.warning(f"PyRIT {attack} produced no results (rc={rc}); tail:\n{tail}")
             continue
@@ -129,7 +129,7 @@ def run(target, bounds, output_dir: str, run_id: str,
     return findings
 
 
-def _invoke(cfg_path):
+def _invoke(cfg_path, timeout=DEFAULT_TIMEOUT):
     cmd = [PYRIT_PYTHON, RUNNER, str(cfg_path)]
     logger.info(f"Running PyRIT: {' '.join(cmd)}")
-    return run_streamed(cmd, timeout=DEFAULT_TIMEOUT, tag="pyrit")
+    return run_streamed(cmd, timeout=timeout, tag="pyrit")

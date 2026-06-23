@@ -177,6 +177,9 @@ describe('AI Attack Surface — garak probe selection grid', () => {
     expect(arg.roe_confirmed).toBe(true)
     expect(arg.targets).toHaveLength(1)
     expect(arg.targets[0]).toMatchObject({ baseurl: 'http://h:8000', path: '/v1/chat/completions' })
+    // run bounds: parallelism default 2; timeout default 600 min sent as seconds.
+    expect(arg.bounds.parallelism).toBe(2)
+    expect(arg.bounds.timeout).toBe(36000)   // 600 min * 60
   })
 
   test('Select all then launch sends the 29 runnable families (excludes incompatible + inactive)', () => {

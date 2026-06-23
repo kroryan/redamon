@@ -75,6 +75,14 @@ export async function GET(request: NextRequest) {
       `MATCH (v:Vulnerability {project_id: $pid})
        WHERE v.source IN ['garak', 'pyrit', 'giskard', 'promptfoo']
        OPTIONAL MATCH (parent)-[:HAS_VULNERABILITY]->(v)
+       // One row per finding even when it has several parents (Endpoint + IP);
+       // prefer the most specific parent so corroboration isn't double-counted.
+       WITH v, parent
+       ORDER BY (CASE WHEN parent IS NULL THEN 3
+                      WHEN 'Endpoint' IN labels(parent) THEN 0
+                      WHEN 'BaseURL' IN labels(parent) THEN 1
+                      ELSE 2 END)
+       WITH v, head(collect(parent)) AS parent
        RETURN v.source AS source, v.severity AS severity, v.type AS type,
               v.ai_owasp_llm_id AS owaspLlmId, v.ai_asr AS asr, v.ai_trials AS trials,
               v.ai_payload_class AS payloadClass, v.ai_transcript_ref AS transcriptRef,

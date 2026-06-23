@@ -21,7 +21,7 @@ logger = logging.getLogger("ai-attack-surface")
 DEFAULT_PROBES = ["promptinject", "dan", "encoding", "leakreplay"]
 DEFAULT_SEED = int(os.environ.get("AI_ATTACK_GARAK_SEED", "0"))
 # Hard cap so a single garak run can't hang the job forever.
-DEFAULT_TIMEOUT = int(os.environ.get("AI_ATTACK_GARAK_TIMEOUT", "3600"))
+DEFAULT_TIMEOUT = int(os.environ.get("AI_ATTACK_GARAK_TIMEOUT", "36000"))
 
 
 def _severity(asr: float) -> str:
@@ -65,7 +65,7 @@ def run(target, bounds, output_dir: str, run_id: str,
         report_prefix=str(report_prefix),
         judge_base_url=judge_base_url,
         api_key=api_key,
-        timeout=DEFAULT_TIMEOUT,
+        timeout=int(getattr(bounds, "timeout", 0) or DEFAULT_TIMEOUT),
         parallel_attempts=max(1, int(getattr(bounds, "parallelism", 2) or 2)),
     )
 

@@ -434,6 +434,13 @@ class TestPromptfooLiveSmoke(unittest.TestCase):
             self.assertIn("beavertails", text)
             self.assertIn("prompt:", text)
 
+    def test_invoke_passes_timeout_to_run_streamed(self):
+        # The generate step runs first; assert it gets our timeout. (No gen file
+        # is produced by the mock, so _invoke returns after the generate step.)
+        with patch.object(padapter, "run_streamed", return_value=(0, "")) as mrun:
+            padapter._invoke("/cfg.json", "/gen.json", "/res.json", None, timeout=1234)
+        self.assertEqual(mrun.call_args_list[0].kwargs["timeout"], 1234)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

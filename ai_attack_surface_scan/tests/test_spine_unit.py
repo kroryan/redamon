@@ -88,6 +88,29 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(c.objective, "")
         self.assertEqual(c.bounds.seed, 0)
 
+    def test_parallelism_and_timeout_defaults(self):
+        os.environ["AI_ATTACK_CONFIG_JSON"] = json.dumps({"project_id": "p", "user_id": "u"})
+        c = cfgmod.load_config()
+        self.assertEqual(c.bounds.parallelism, 2)      # safe CPU default
+        self.assertEqual(c.bounds.timeout, 36000)      # 10 hours
+
+    def test_parallelism_and_timeout_parsed_and_clamped(self):
+        os.environ["AI_ATTACK_CONFIG_JSON"] = json.dumps({
+            "project_id": "p", "user_id": "u",
+            "bounds": {"parallelism": 6, "timeout": 1800},
+        })
+        c = cfgmod.load_config()
+        self.assertEqual(c.bounds.parallelism, 6)
+        self.assertEqual(c.bounds.timeout, 1800)
+        # out-of-range values clamp: parallelism -> [1,16], timeout -> [60,86400]
+        os.environ["AI_ATTACK_CONFIG_JSON"] = json.dumps({
+            "project_id": "p", "user_id": "u",
+            "bounds": {"parallelism": 999, "timeout": 5},
+        })
+        c2 = cfgmod.load_config()
+        self.assertEqual(c2.bounds.parallelism, 16)
+        self.assertEqual(c2.bounds.timeout, 60)
+
     def test_inline_json_precedence_over_file(self):
         os.environ["AI_ATTACK_CONFIG_JSON"] = json.dumps({"project_id": "inline"})
         os.environ["AI_ATTACK_CONFIG"] = "/nonexistent.json"

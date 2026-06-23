@@ -30,6 +30,11 @@ class Bounds:
     # that a single-CPU victim's queue doesn't back up past the request timeout,
     # high enough to make progress. Raise it for a fast/GPU target.
     parallelism: int = 2
+    # Hard wall-clock budget (seconds) for the whole tool invocation; when
+    # exceeded the subprocess is killed (proc.run_streamed). Default 36000 = 10h
+    # — big multi-family garak sweeps and slow probes (atkgen) need room. The UI
+    # exposes it in minutes.
+    timeout: int = 36000
     # Hard guardrail floor — categories blocked before any payload leaves the
     # container, regardless of other settings (§10). Read-only floor.
     hard_blocked_categories: list[str] = field(
@@ -115,6 +120,8 @@ def load_config() -> RunConfig:
         seed=int(bounds_data.get("seed", 0) or 0),
         # Clamp to a sane range so a stray value can't hammer or stall the target.
         parallelism=max(1, min(16, int(bounds_data.get("parallelism", 2) or 2))),
+        # Clamp 1 min .. 24h.
+        timeout=max(60, min(86400, int(bounds_data.get("timeout", 36000) or 36000))),
     )
 
     return RunConfig(

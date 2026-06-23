@@ -22,7 +22,7 @@ logger = logging.getLogger("ai-attack-surface")
 
 GISKARD_PYTHON = os.environ.get("GISKARD_PYTHON", "python")
 RUNNER = os.path.join(os.path.dirname(__file__), "giskard_run.py")
-DEFAULT_TIMEOUT = int(os.environ.get("AI_ATTACK_GISKARD_TIMEOUT", "3600"))
+DEFAULT_TIMEOUT = int(os.environ.get("AI_ATTACK_GISKARD_TIMEOUT", "36000"))
 
 _SEVERITY = {"major": "high", "medium": "medium", "minor": "low"}
 
@@ -67,7 +67,7 @@ def run(target, bounds, output_dir: str, run_id: str,
     cfg_path = out / "giskard_config.json"
     cfg_path.write_text(json.dumps(cfg, indent=2))
 
-    rc, tail = _invoke(cfg_path)
+    rc, tail = _invoke(cfg_path, timeout=int(getattr(bounds, "timeout", 0) or DEFAULT_TIMEOUT))
     if not os.path.exists(cfg["out"]):
         logger.warning(f"giskard produced no report (rc={rc}); tail:\n{tail}")
         return []
@@ -113,9 +113,9 @@ def run(target, bounds, output_dir: str, run_id: str,
     return findings
 
 
-def _invoke(cfg_path):
+def _invoke(cfg_path, timeout=DEFAULT_TIMEOUT):
     cmd = [GISKARD_PYTHON, RUNNER, str(cfg_path)]
     logger.info(f"Running giskard: {' '.join(cmd)}")
     # Belt-and-suspenders egress guard: ensure no OpenAI key leaks into the run.
     env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY",)}
-    return run_streamed(cmd, env=env, timeout=DEFAULT_TIMEOUT, tag="giskard")
+    return run_streamed(cmd, env=env, timeout=timeout, tag="giskard")

@@ -128,7 +128,7 @@ class TestAdapterFindings(unittest.TestCase):
         ])
         with tempfile.TemporaryDirectory() as d:
             # the adapter checks the out file exists; create it so it proceeds to parse
-            def fake_invoke(cfg_path):
+            def fake_invoke(cfg_path, **_):
                 cfg = json.load(open(cfg_path))
                 open(cfg["out"], "w").close()
                 return 0, ""
@@ -152,7 +152,7 @@ class TestAdapterFindings(unittest.TestCase):
                              results=[PyritResult("o", "SUCCESS", 1, "ok")])
         captured = {}
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(cfg_path):
+            def fake_invoke(cfg_path, **_):
                 with open(cfg_path) as fh:
                     captured.update(json.load(fh))
                 open(captured["out"], "w").close()
@@ -174,7 +174,7 @@ class TestAdapterFindings(unittest.TestCase):
         captured = {}
         with tempfile.TemporaryDirectory() as d, \
              patch.dict(os.environ, {"AI_ATTACK_PYRIT_SEED": "99"}):
-            def fake_invoke(cfg_path):
+            def fake_invoke(cfg_path, **_):
                 with open(cfg_path) as fh:
                     captured.update(json.load(fh))
                 open(captured["out"], "w").close()
@@ -199,7 +199,7 @@ class TestAdapterFindings(unittest.TestCase):
         report = PyritReport(attack="x", pyrit_version="0.14.0", seed=0,
                              results=[PyritResult("o", "SUCCESS", 2, "ok")])
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(cfg_path):
+            def fake_invoke(cfg_path, **_):
                 open(json.load(open(cfg_path))["out"], "w").close()
                 return 0, ""
             with patch.object(padapter, "_invoke", side_effect=fake_invoke), \
@@ -225,7 +225,7 @@ class TestAdapterFindings(unittest.TestCase):
         t.ai_model_ids = "qwen2.5:7b"
         captured = {}
         with tempfile.TemporaryDirectory() as d:
-            def cap(cfg_path):
+            def cap(cfg_path, **_):
                 cfg = json.load(open(cfg_path))
                 captured.update(cfg)
                 open(cfg["out"], "w").close()
@@ -244,7 +244,7 @@ class TestAdapterFindings(unittest.TestCase):
             PyritResult("a", "FAILURE", 4, "refused"),
         ])
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(cfg_path):
+            def fake_invoke(cfg_path, **_):
                 open(json.load(open(cfg_path))["out"], "w").close()
                 return 0, ""
             with patch.object(padapter, "_invoke", side_effect=fake_invoke), \
@@ -252,6 +252,11 @@ class TestAdapterFindings(unittest.TestCase):
                 findings = padapter.run(self._target(), Bounds(asr_threshold=0.3, judge_model="m"),
                                         output_dir=d, run_id="t1", judge_base_url="http://localhost:11434")
         self.assertEqual(findings, [])
+
+    def test_invoke_passes_timeout_to_run_streamed(self):
+        with patch.object(padapter, "run_streamed", return_value=(0, "")) as mrun:
+            padapter._invoke("/tmp/cfg.json", timeout=1234)
+        self.assertEqual(mrun.call_args.kwargs["timeout"], 1234)
 
 
 if __name__ == "__main__":
