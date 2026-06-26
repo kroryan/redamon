@@ -571,7 +571,13 @@ class JsReconMixin:
             created_endpoints = set()
             for ep in js_recon_data.get("endpoints", []):
                 try:
-                    if ep.get("validation_status") != "hittable":
+                    # Drop only endpoints a probe positively confirmed as dead.
+                    # 'hittable' (probe succeeded), 'unvalidated' (probing off,
+                    # unresolved upload-relative URL, or unsupported scheme), and
+                    # missing status are all ingested — only 'not_hittable' is
+                    # filtered out, so disabling endpoint probing keeps the prior
+                    # "ingest every extracted endpoint" behavior.
+                    if ep.get("validation_status") == "not_hittable":
                         continue
 
                     path = ep.get("path", "")

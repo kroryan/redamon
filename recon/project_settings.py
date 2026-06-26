@@ -426,9 +426,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'JS_RECON_VALIDATE_KEYS': True,
     'JS_RECON_VALIDATION_TIMEOUT': 5,
     'JS_RECON_EXTRACT_ENDPOINTS': True,
-    'JS_RECON_VALIDATE_ENDPOINTS': True,
+    'JS_RECON_VALIDATE_ENDPOINTS': False,
     'JS_RECON_ENDPOINT_ACCEPT_STATUS': [200, 201, 204, 301, 302, 307, 308, 401, 403, 405],
     'JS_RECON_ENDPOINT_CUSTOM_HEADERS': [],
+    'JS_RECON_ENDPOINT_CONCURRENCY': 10,
     'JS_RECON_REGEX_PATTERNS': True,
     'JS_RECON_SOURCE_MAPS': True,
     'JS_RECON_DEPENDENCY_CHECK': True,
@@ -1129,6 +1130,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['JS_RECON_VALIDATE_ENDPOINTS'] = project.get('jsReconValidateEndpoints', DEFAULT_SETTINGS['JS_RECON_VALIDATE_ENDPOINTS'])
     settings['JS_RECON_ENDPOINT_ACCEPT_STATUS'] = project.get('jsReconEndpointAcceptStatus') or DEFAULT_SETTINGS['JS_RECON_ENDPOINT_ACCEPT_STATUS']
     settings['JS_RECON_ENDPOINT_CUSTOM_HEADERS'] = project.get('jsReconEndpointCustomHeaders', DEFAULT_SETTINGS['JS_RECON_ENDPOINT_CUSTOM_HEADERS'])
+    settings['JS_RECON_ENDPOINT_CONCURRENCY'] = project.get('jsReconEndpointConcurrency', DEFAULT_SETTINGS['JS_RECON_ENDPOINT_CONCURRENCY'])
     settings['JS_RECON_AI_SDK_DETECTION_ENABLED'] = project.get('jsReconAiSdkDetectionEnabled', DEFAULT_SETTINGS['JS_RECON_AI_SDK_DETECTION_ENABLED'])
 
     # FFuf Directory Fuzzer

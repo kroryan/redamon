@@ -242,6 +242,7 @@ export const reconPresetSchema = z.object({
   jsReconValidateEndpoints: bool,
   jsReconEndpointAcceptStatus: intArr,
   jsReconEndpointCustomHeaders: strArr,
+  jsReconEndpointConcurrency: int,
   jsReconRegexPatterns: bool,
   jsReconSourceMaps: bool,
   jsReconDependencyCheck: bool,
@@ -711,8 +712,8 @@ export const RECON_PARAMETER_CATALOG = `
 - jsluiceVerifyTimeout: integer - Per-request httpx timeout in seconds
 - jsluiceVerifyRateLimit: integer - Max probe requests per second
 - jsluiceVerifyThreads: integer - httpx worker threads
-- jsluiceVerifyAcceptStatus: array of integers - HTTP status codes treated as "live" by the verifier
-- jsluiceExcludePatterns: array of strings - Deny-list patterns. Extensions like ".js" match the path suffix only; everything else is a substring match against the URL path and query.
+- jsluiceVerifyAcceptStatus: integer[] - HTTP status codes treated as "live" by the verifier
+- jsluiceExcludePatterns: string[] - Deny-list patterns. Extensions like ".js" match the path suffix only; everything else is a substring match against the URL path and query.
 
 ## JavaScript Analysis - JS Recon (deep)
 - jsReconEnabled: boolean - Run deep JS analysis
@@ -722,9 +723,10 @@ export const RECON_PARAMETER_CATALOG = `
 - jsReconValidateKeys: boolean - Validate discovered API keys
 - jsReconValidationTimeout: integer
 - jsReconExtractEndpoints: boolean
-- jsReconValidateEndpoints: boolean - Verify extracted endpoints before graph ingestion
+- jsReconValidateEndpoints: boolean - Probe extracted endpoints and drop confirmed-dead ones before graph ingestion (default off)
 - jsReconEndpointAcceptStatus: integer[] - HTTP status codes treated as live during endpoint verification
 - jsReconEndpointCustomHeaders: string[] - Header lines used when verifying extracted endpoints
+- jsReconEndpointConcurrency: integer - Parallel endpoint validation probes (default 10)
 - jsReconRegexPatterns: boolean
 - jsReconSourceMaps: boolean - Analyze source maps
 - jsReconDependencyCheck: boolean

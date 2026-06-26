@@ -627,7 +627,7 @@ def _validate_secrets(secrets: list, settings: dict) -> list:
 
 def _validate_extracted_endpoints(endpoints: list, settings: dict, request_func=None) -> list:
     """Validate extracted endpoints with lightweight non-following HTTP probes."""
-    if not settings.get('JS_RECON_VALIDATE_ENDPOINTS', True):
+    if not settings.get('JS_RECON_VALIDATE_ENDPOINTS', False):
         for endpoint in endpoints:
             endpoint['validation_status'] = 'unvalidated'
             endpoint['validation_error'] = 'validation_disabled'
@@ -666,7 +666,9 @@ def _validate_extracted_endpoints(endpoints: list, settings: dict, request_func=
     )
     custom_header_lines = settings.get('JS_RECON_ENDPOINT_CUSTOM_HEADERS', [])
     timeout = _clamp_int(settings.get('JS_RECON_VALIDATION_TIMEOUT', 5), 5, 1, 30)
-    workers = _clamp_int(settings.get('JS_RECON_CONCURRENCY', 10), 10, 1, 20)
+    # Dedicated parallelism dial for endpoint probes, independent of the shared
+    # JS_RECON_CONCURRENCY used for downloads/secret validation.
+    workers = _clamp_int(settings.get('JS_RECON_ENDPOINT_CONCURRENCY', 10), 10, 1, 20)
     requester = request_func or requests.request
 
     def _validate_one(endpoint: dict) -> None:
@@ -883,6 +885,7 @@ def run_js_recon(combined_result: dict, settings: dict) -> dict:
             ("JS_RECON_VALIDATE_ENDPOINTS", "Endpoint validation"),
             ("JS_RECON_ENDPOINT_ACCEPT_STATUS", "Endpoint validation"),
             ("JS_RECON_ENDPOINT_CUSTOM_HEADERS", "Endpoint validation"),
+            ("JS_RECON_ENDPOINT_CONCURRENCY", "Endpoint validation"),
             ("JS_RECON_AI_SDK_DETECTION_ENABLED", "AI surface"),
         ],
     )

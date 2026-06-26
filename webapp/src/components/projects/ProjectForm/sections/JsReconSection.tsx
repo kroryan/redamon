@@ -577,14 +577,14 @@ export function JsReconSection({ data, updateField, projectId, mode, onRun }: Js
                 <div className={styles.toggleRow}>
                   <div>
                     <span className={styles.toggleLabel}>Validate Extracted Endpoints</span>
-                    <p className={styles.toggleDescription}>Probe endpoints extracted from JS before graph write. Headers below apply only to endpoint probes.</p>
+                    <p className={styles.toggleDescription}>Off by default. When on, each extracted endpoint is probed and only confirmed-dead ones are dropped before graph write. Headers below apply only to endpoint probes.</p>
                   </div>
                   <Toggle
-                    checked={(data as any).jsReconValidateEndpoints ?? true}
+                    checked={(data as any).jsReconValidateEndpoints ?? false}
                     onChange={(checked) => updateField('jsReconValidateEndpoints' as any, checked)}
                   />
                 </div>
-                {((data as any).jsReconValidateEndpoints ?? true) && (
+                {((data as any).jsReconValidateEndpoints ?? false) && (
                   <div className={styles.fieldRow}>
                     <div className={styles.fieldGroup}>
                       <label className={styles.fieldLabel}>Accepted Status Codes</label>
@@ -620,6 +620,18 @@ export function JsReconSection({ data, updateField, projectId, mode, onRun }: Js
                         placeholder={`Cookie: session=...\nAuthorization: Bearer ...`}
                       />
                       <span className={styles.fieldHint}>One header per line for endpoint validation probes</span>
+                    </div>
+                    <div className={styles.fieldGroup}>
+                      <label className={styles.fieldLabel}>Probe Concurrency</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        className="textInput"
+                        value={(data as any).jsReconEndpointConcurrency ?? 10}
+                        onChange={(e) => updateField('jsReconEndpointConcurrency' as any, parseInt(e.target.value) || 10)}
+                      />
+                      <span className={styles.fieldHint}>Parallel endpoint probes (1-20, default 10)</span>
                     </div>
                   </div>
                 )}

@@ -64,7 +64,7 @@ class GraphClient(JsReconMixin):
 
 
 class TestJsReconGraphIngestion(unittest.TestCase):
-    def test_only_hittable_endpoints_are_ingested_with_validation_metadata_and_id(self):
+    def test_only_confirmed_dead_endpoints_are_dropped_with_validation_metadata_and_id(self):
         client = GraphClient()
         recon_data = {
             "domain": "example.com",
@@ -104,26 +104,28 @@ class TestJsReconGraphIngestion(unittest.TestCase):
             kwargs for query, kwargs in client.driver.session_obj.calls
             if "MERGE (e:Endpoint" in query
         ]
-        self.assertEqual(stats["endpoints_created"], 1)
-        self.assertEqual(len(endpoint_calls), 1)
+        ingested_paths = {kwargs["path"] for kwargs in endpoint_calls}
+        # 'hittable' and the un-probed 'unknown' endpoint are ingested; only the
+        # probe-confirmed 'not_hittable' endpoint is dropped.
+        self.assertEqual(stats["endpoints_created"], 2)
+        self.assertEqual(ingested_paths, {"/api/live", "/api/unknown"})
+        self.assertNotIn("/api/dead", ingested_paths)
 
+        live_call = next(k for k in endpoint_calls if k["path"] == "/api/live")
         expected_hash = hashlib.sha256(
             "https://example.com:POST:/api/live".encode()
         ).hexdigest()[:16]
-        self.assertEqual(endpoint_calls[0]["id"], f"endpoint-u1-p1-js-{expected_hash}")
-        self.assertEqual(endpoint_calls[0]["validation_status"], "hittable")
-        self.assertEqual(endpoint_calls[0]["status_code"], 200)
-        self.assertEqual(endpoint_calls[0]["resolved_url"], "https://example.com/api/live")
+        self.assertEqual(live_call["id"], f"endpoint-u1-p1-js-{expected_hash}")
+        self.assertEqual(live_call["validation_status"], "hittable")
+        self.assertEqual(live_call["status_code"], 200)
+        self.assertEqual(live_call["resolved_url"], "https://example.com/api/live")
         link_calls = [
             (query, kwargs) for query, kwargs in client.driver.session_obj.calls
             if "MERGE (file)-[r:HAS_ENDPOINT]->(n)" in query
         ]
-        self.assertEqual(len(link_calls), 1)
+        self.assertEqual(len(link_calls), 2)
         self.assertIn("MATCH (n:Endpoint {path: $path, method: $method, baseurl: $baseurl", link_calls[0][0])
         self.assertNotIn("MATCH (n:Endpoint {id: $nid})", link_calls[0][0])
-        self.assertEqual(link_calls[0][1]["path"], "/api/live")
-        self.assertEqual(link_calls[0][1]["method"], "POST")
-        self.assertEqual(link_calls[0][1]["baseurl"], "https://example.com")
         self.assertEqual(stats["errors"], [])
 
     def test_existing_endpoint_and_unmatched_file_link_do_not_increment_counts(self):
@@ -156,6 +158,46 @@ class TestJsReconGraphIngestion(unittest.TestCase):
             if "MERGE (file)-[r:HAS_ENDPOINT]->(n)" in query
         ]
         self.assertEqual(len(link_calls), 1)
+        self.assertEqual(stats["errors"], [])
+
+    def test_unvalidated_endpoints_are_ingested_when_probing_is_off(self):
+        # With endpoint probing disabled (the default), every endpoint is tagged
+        # 'unvalidated'. These must still reach the graph — disabling probing keeps
+        # the prior "ingest every extracted endpoint" behavior.
+        client = GraphClient()
+        recon_data = {
+            "domain": "example.com",
+            "js_recon": {
+                "scan_metadata": {"scan_timestamp": "2026-05-28T00:00:00Z"},
+                "endpoints": [
+                    {
+                        "path": "/api/a",
+                        "method": "GET",
+                        "source_js": "https://example.com/app.js",
+                        "base_url": "https://example.com",
+                        "validation_status": "unvalidated",
+                        "validation_error": "validation_disabled",
+                    },
+                    {
+                        "path": "/api/b",
+                        "method": "GET",
+                        "source_js": "https://example.com/app.js",
+                        "base_url": "https://example.com",
+                        "validation_status": "unvalidated",
+                        "validation_error": "validation_disabled",
+                    },
+                ],
+            },
+        }
+
+        stats = client.update_graph_from_js_recon(recon_data, "u1", "p1")
+
+        endpoint_calls = [
+            kwargs for query, kwargs in client.driver.session_obj.calls
+            if "MERGE (e:Endpoint" in query
+        ]
+        self.assertEqual(stats["endpoints_created"], 2)
+        self.assertEqual({k["path"] for k in endpoint_calls}, {"/api/a", "/api/b"})
         self.assertEqual(stats["errors"], [])
 
 
