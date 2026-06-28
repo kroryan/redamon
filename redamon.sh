@@ -25,7 +25,8 @@ DEV_COMPOSE="-f docker-compose.yml -f docker-compose.dev.yml"
 # they must be wiped explicitly):
 #   - AI Attack Surface scan containers:  redamon-ai-attack-<proj>-<run>
 #   - On-demand local LLM (Ollama) judge/attacker:  redamon-local-llm
-SPAWNED_CONTAINER_NAME_FILTERS=(--filter "name=redamon-ai-attack-" --filter "name=redamon-local-llm")
+#   - CodeFix build sandboxes (T6/E10):  redamon-codefix-<job>
+SPAWNED_CONTAINER_NAME_FILTERS=(--filter "name=redamon-ai-attack-" --filter "name=redamon-local-llm" --filter "name=redamon-codefix-")
 # The on-demand local LLM image (pulled at runtime, not built) + its models volume.
 LOCAL_LLM_IMAGE="${LOCAL_LLM_IMAGE:-ollama/ollama:latest}"
 LOCAL_LLM_VOLUME="${LOCAL_LLM_VOLUME:-redamon_llm_models}"
@@ -1084,6 +1085,9 @@ cmd_purge() {
     # Belt-and-suspenders: explicitly drop the local-LLM models volume in case it
     # was created outside the compose lifecycle.
     docker volume rm "$LOCAL_LLM_VOLUME" >/dev/null 2>&1 || true
+    # The CodeFix sandbox network is created at runtime by the orchestrator (no
+    # compose service is attached), so `compose down` never removes it.
+    docker network rm redamon-codefix-net >/dev/null 2>&1 || true
 
     info "Removing RedAmon images..."
     remove_redamon_images

@@ -12,6 +12,9 @@
   align-items: center;
   justify-content: space-between;
   padding: var(--space-3) var(--space-4);
+  /* Reserve clearance on the right so the Re-triage button doesn't sit under
+     the page-level floating WikiInfoButton (positioned at top:12 right:16). */
+  padding-right: calc(var(--space-4) + 32px);
   border-bottom: 1px solid var(--border-default);
   flex-shrink: 0;
 }
