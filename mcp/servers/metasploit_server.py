@@ -1106,7 +1106,8 @@ class SessionProgressHandler(BaseHTTPRequestHandler):
         """Send a JSON response."""
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        # No CORS header (I9): served only server-side by the agent container;
+        # leaks live session/exploitation data if readable cross-origin.
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
 
@@ -1194,11 +1195,9 @@ class SessionProgressHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_OPTIONS(self):
-        """CORS preflight."""
+        """Preflight: no CORS allowance (I9). Cross-origin browser reads of this
+        server-side-only endpoint are intentionally rejected."""
         self.send_response(204)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
     def log_message(self, format, *args):

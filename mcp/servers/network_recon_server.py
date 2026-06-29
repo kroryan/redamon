@@ -1300,7 +1300,10 @@ class HydraProgressHandler(BaseHTTPRequestHandler):
                 progress = get_hydra_progress()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
+                # No CORS header (I9): this endpoint serves live exploitation
+                # data (cracked creds) and is consumed only server-side by the
+                # agent container. A wildcard ACAO let any website the operator
+                # visits read it cross-origin.
                 self.end_headers()
                 self.wfile.write(json.dumps(progress).encode())
             except Exception as e:

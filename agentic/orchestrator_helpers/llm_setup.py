@@ -7,6 +7,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 
 from project_settings import load_project_settings
+from orchestrator_helpers.llm_url_guard import validate_llm_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,9 @@ def setup_llm(
 
         if ptype == "anthropic":
             anth_model = custom_llm_config.get("modelIdentifier", api_model)
+            # SSRF guard (I15): reject metadata/link-local baseUrl targets. The
+            # anthropic SDK has no TLS-off knob, so ssl_verify stays True here.
+            validate_llm_base_url(custom_llm_config.get("baseUrl"))
             anth_kwargs = dict(
                 model=anth_model,
                 api_key=custom_llm_config.get("apiKey", ""),
@@ -157,6 +161,10 @@ def setup_llm(
                 max_tokens=custom_llm_config.get("maxTokens", 16384),
             )
             base_url = custom_llm_config.get("baseUrl")
+            ssl_verify = custom_llm_config.get("sslVerify", True)
+            # SSRF guard (I15) + TLS-off-on-public guard (I16). Localhost/LAN
+            # self-hosted models stay allowed; cloud metadata is rejected.
+            validate_llm_base_url(base_url, ssl_verify=ssl_verify)
             if base_url:
                 kwargs["base_url"] = base_url
             headers = custom_llm_config.get("defaultHeaders")
@@ -165,7 +173,6 @@ def setup_llm(
             timeout = custom_llm_config.get("timeout")
             if timeout:
                 kwargs["timeout"] = float(timeout)
-            ssl_verify = custom_llm_config.get("sslVerify", True)
             if not ssl_verify:
                 import httpx
                 kwargs["http_client"] = httpx.Client(verify=False)
@@ -179,6 +186,8 @@ def setup_llm(
                 f"OPENAI_COMPAT_BASE_URL is required for model '{model_name}'. "
                 "Consider migrating to Global Settings."
             )
+        # Operator-set env baseUrl; guard it too for defense in depth (I15).
+        validate_llm_base_url(openai_compat_base_url)
         llm = ChatOpenAI(
             model=api_model,
             api_key=openai_compat_api_key or "ollama",

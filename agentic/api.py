@@ -107,11 +107,20 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware for webapp (allow all origins for development)
+# CORS scoped to the webapp origin (I17). A wildcard `*` let any website the
+# operator visits script their browser into reading the agent's unauthenticated
+# endpoints cross-origin. Scope to the webapp origin(s); override with
+# AGENT_CORS_ORIGINS (comma-separated) for non-localhost deployments.
+_default_cors_origins = "http://localhost:3000,http://127.0.0.1:3000"
+_cors_origins = [
+    o.strip()
+    for o in os.getenv("AGENT_CORS_ORIGINS", _default_cors_origins).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # Must be False when allow_origins is ["*"]
+    allow_origins=_cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1861,6 +1870,20 @@ async def test_llm_provider(body: LlmProviderTestRequest):
             )
         elif ptype == "openai_compatible":
             from langchain_openai import ChatOpenAI
+            from orchestrator_helpers.llm_url_guard import (
+                BaseUrlValidationError,
+                validate_llm_base_url,
+            )
+            # SSRF guard (I15) + TLS-off-on-public guard (I16). Rejected before
+            # any live request is issued, so the test endpoint can't be abused
+            # to probe internal services or cloud metadata.
+            try:
+                validate_llm_base_url(body.baseUrl, ssl_verify=body.sslVerify)
+            except BaseUrlValidationError as e:
+                return JSONResponse(
+                    content={"success": False, "error": str(e)},
+                    status_code=400,
+                )
             kwargs = dict(
                 model=body.modelIdentifier or "default",
                 api_key=body.apiKey or "ollama",

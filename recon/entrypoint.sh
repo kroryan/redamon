@@ -40,17 +40,28 @@ echo -e "${YELLOW}[*] Checking Docker socket access...${NC}"
 SOCKET_PATH=${DOCKER_HOST#unix://}
 SOCKET_PATH=${SOCKET_PATH:-/var/run/docker.sock}
 
-if [ -S "$SOCKET_PATH" ]; then
-    if docker info > /dev/null 2>&1; then
-        echo -e "${GREEN}[+] Docker socket accessible${NC}"
-    else
-        echo -e "${RED}[!] Docker socket exists but not accessible${NC}"
-        echo -e "${RED}    Make sure the container has permissions to access Docker${NC}"
-        echo -e "${RED}    Try: docker-compose up with the docker group or root${NC}"
+# The socket may be the filtering broker socket shared via a named volume
+# (post-5.1.0 hardening), which can briefly race the volume mount at the first
+# instant of boot. Retry the functional check before declaring failure, and
+# always report the path actually in use ($SOCKET_PATH), not a hardcoded one.
+DOCKER_READY=false
+for _attempt in {1..8}; do
+    if [ -S "$SOCKET_PATH" ] && docker info > /dev/null 2>&1; then
+        DOCKER_READY=true
+        break
     fi
+    sleep 1
+done
+
+if [ "$DOCKER_READY" = true ]; then
+    echo -e "${GREEN}[+] Docker socket accessible at ${SOCKET_PATH}${NC}"
+elif [ -S "$SOCKET_PATH" ]; then
+    echo -e "${RED}[!] Docker socket at ${SOCKET_PATH} exists but is not responding${NC}"
+    echo -e "${RED}    Make sure the container can reach the Docker/broker daemon${NC}"
+    echo -e "${YELLOW}    Continuing anyway - some tools may not work${NC}"
 else
-    echo -e "${RED}[!] Docker socket not found at /var/run/docker.sock${NC}"
-    echo -e "${RED}    Mount it with: -v /var/run/docker.sock:/var/run/docker.sock${NC}"
+    echo -e "${RED}[!] Docker socket not found at ${SOCKET_PATH}${NC}"
+    echo -e "${RED}    Expected the host socket or the broker socket mounted at this path${NC}"
     echo -e "${YELLOW}    Continuing anyway - some tools may not work${NC}"
 fi
 

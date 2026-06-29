@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { reconPresetSchema, extractJson, RECON_PARAMETER_CATALOG } from '@/lib/recon-preset-schema'
+import { assertSafeLlmBaseUrl, BaseUrlValidationError } from '@/lib/llm-url-guard'
 
 // ---------------------------------------------------------------------------
 // POST /api/presets/generate
@@ -111,6 +112,10 @@ interface OpenAICompatOptions {
  * chat does for the same provider record.
  */
 async function callOpenAICompatible(opts: OpenAICompatOptions): Promise<string> {
+  // SSRF guard (I15) + TLS-off-on-public guard (I16). Localhost/LAN self-hosted
+  // endpoints stay allowed; cloud metadata and public-host TLS bypass are rejected.
+  await assertSafeLlmBaseUrl(opts.baseUrl, { sslVerify: opts.sslVerify })
+
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), (opts.timeout || 120) * 1000)
 
@@ -376,6 +381,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ parameters: result.data })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
+
+    if (error instanceof BaseUrlValidationError) {
+      return NextResponse.json({ error: message }, { status: 400 })
+    }
 
     if (error instanceof Error && error.name === 'AbortError') {
       return NextResponse.json(
