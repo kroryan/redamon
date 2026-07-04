@@ -1555,6 +1555,95 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     return settings
 
 
+# =============================================================================
+# Memory governor (Part 2): dynamically cap RAM-relevant tool parameters to the
+# memory actually available when the scan starts. Ratio-scale concurrency knobs;
+# byte-budget the in-memory *_MAX_* accumulators. Emits [RESOURCE-CAP] log lines
+# (rendered red in the recon drawer) only when a value is actually reduced.
+# Applied AFTER stealth/RoE so those low-resource profiles win first, then the
+# governor tightens further under live memory pressure. Fail-open on any error.
+# =============================================================================
+
+# Concurrency / thread / worker / parallelism keys -> RATIO model, floor.
+_GOV_RATIO_KEYS = {
+    'DNS_MAX_WORKERS': 1, 'NAABU_THREADS': 1, 'NMAP_PARALLELISM': 1,
+    'HTTPX_THREADS': 1, 'BANNER_GRAB_THREADS': 1, 'NUCLEI_CONCURRENCY': 1,
+    'NUCLEI_BULK_SIZE': 1, 'SECURITY_CHECK_MAX_WORKERS': 1, 'SUBJACK_THREADS': 1,
+    'VHOST_SNI_CONCURRENCY': 1, 'AI_SURFACE_RECON_MAX_WORKERS': 1,
+    'KATANA_PARALLELISM': 1, 'KATANA_CONCURRENCY': 1, 'ZAP_AJAX_SPIDER_PARALLELISM': 1,
+    'ZAP_AJAX_SPIDER_NUMBER_OF_BROWSERS': 1,  # each = a headless Firefox (~300-500MB)
+    'GAU_WORKERS': 1, 'GAU_THREADS': 1, 'GAU_VERIFY_THREADS': 1,
+    'GAU_METHOD_DETECT_THREADS': 1, 'HAKRAWLER_PARALLELISM': 1, 'HAKRAWLER_THREADS': 1,
+    'JSLUICE_PARALLELISM': 1, 'JSLUICE_CONCURRENCY': 1, 'JSLUICE_VERIFY_THREADS': 1,
+    'JS_RECON_CONCURRENCY': 1, 'JS_RECON_ENDPOINT_CONCURRENCY': 1,
+    'FFUF_THREADS': 1, 'FFUF_PARALLELISM': 1, 'ARJUN_THREADS': 1,
+    'PARAMSPIDER_WORKERS': 1, 'KITERUNNER_THREADS': 1, 'KITERUNNER_PARALLELISM': 1,
+    'KITERUNNER_METHOD_DETECT_THREADS': 1, 'KITERUNNER_CONNECTIONS': 1,
+    'GRAPHQL_CONCURRENCY': 1,
+    'WEB_CACHE_POISON_CONCURRENCY': 1, 'WEB_CACHE_POISON_CONFIRM_WORKERS': 1,
+    'SHODAN_WORKERS': 1, 'OTX_WORKERS': 1, 'VIRUSTOTAL_WORKERS': 1,
+    'CENSYS_WORKERS': 1, 'CRIMINALIP_WORKERS': 1, 'FOFA_WORKERS': 1,
+    'NETLAS_WORKERS': 1, 'ZOOMEYE_WORKERS': 1,
+}
+
+# In-memory accumulators -> BYTE-BUDGET model: key -> (bytes-per-unit family, floor).
+_GOV_BUDGET_KEYS = {
+    'KATANA_MAX_URLS': ('url', 1000), 'GAU_MAX_URLS': ('url', 1000),
+    'HAKRAWLER_MAX_URLS': ('url', 1000), 'ZAP_AJAX_SPIDER_MAX_URLS': ('url', 100),
+    'ARJUN_MAX_ENDPOINTS': ('url', 100),
+    'JS_RECON_MAX_FILES': ('js_file', 50), 'JSLUICE_MAX_FILES': ('js_file', 50),
+    'VHOST_SNI_MAX_CANDIDATES_PER_IP': ('vhost_candidate', 50),
+    'URLSCAN_MAX_RESULTS': ('osint_result', 100), 'FOFA_MAX_RESULTS': ('osint_result', 100),
+    'NETLAS_MAX_RESULTS': ('osint_result', 100), 'ZOOMEYE_MAX_RESULTS': ('osint_result', 100),
+    'UNCOVER_MAX_RESULTS': ('osint_result', 100), 'CRTSH_MAX_RESULTS': ('osint_result', 100),
+    'HACKERTARGET_MAX_RESULTS': ('osint_result', 100), 'KNOCKPY_RECON_MAX_RESULTS': ('osint_result', 100),
+    'SUBFINDER_MAX_RESULTS': ('osint_result', 100), 'AMASS_MAX_RESULTS': ('osint_result', 100),
+}
+
+
+def apply_memory_governor(settings: dict[str, Any]) -> dict[str, Any]:
+    """Cap RAM-relevant tool parameters to available memory. Pure; fail-open."""
+    try:
+        from graph_db import resource_governor as rg
+    except Exception:
+        try:
+            import resource_governor as rg   # direct (tests / alt path)
+        except Exception:
+            return settings  # governor unavailable -> unchanged (fail open)
+    try:
+        if not rg.governor_enabled():
+            return settings
+    except Exception:
+        return settings
+
+    for key, floor in _GOV_RATIO_KEYS.items():
+        val = settings.get(key)
+        if isinstance(val, int) and not isinstance(val, bool) and val > 0:
+            try:
+                eff = rg.scaled(val, floor)
+            except Exception:
+                continue
+            if eff < val:
+                tool = key.split('_')[0].lower()
+                rg.log_cap(tool, key, val, eff, 'ratio')
+                settings[key] = eff
+
+    for key, (family, floor) in _GOV_BUDGET_KEYS.items():
+        val = settings.get(key)
+        if isinstance(val, int) and not isinstance(val, bool) and val > 0:
+            try:
+                per = rg.bytes_per_unit(family)
+                eff = rg.scaled_cap(val, per, None, floor)
+            except Exception:
+                continue
+            if eff < val:
+                tool = key.split('_')[0].lower()
+                rg.log_cap(tool, key, val, eff, 'byte-budget')
+                settings[key] = eff
+
+    return settings
+
+
 def get_settings() -> dict[str, Any]:
     """
     Get project settings from webapp API.
@@ -1587,6 +1676,9 @@ def get_settings() -> dict[str, Any]:
     # idempotent.
     settings = apply_stealth_overrides(settings)
     settings = apply_ai_pipeline_overrides(settings)
+    # Memory governor (Part 2): last, so it tightens whatever stealth/RoE left,
+    # based on the RAM available at scan start.
+    settings = apply_memory_governor(settings)
     return settings
 
 

@@ -1803,6 +1803,10 @@ class PhaseAwareToolExecutor:
                 return result
 
             spawn_result = await reg.spawn(project_id, target_tool, target_args, runner, label=label)
+            # spawn() returns an {"error": ...} dict when it can't start (e.g. the
+            # memory-governor job cap); surface that as a failure, not success.
+            if isinstance(spawn_result, dict) and spawn_result.get("error"):
+                return {"success": False, "output": None, "error": spawn_result["error"]}
             return {"success": True, "output": str(spawn_result), "error": None}
 
         if tool_name == "job_status":

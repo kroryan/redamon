@@ -294,6 +294,17 @@
   font-weight: 500;
 }
 
+/* Memory governor (Part 5): a parameter was throttled to fit available RAM. */
+.logResourceCap {
+  background: rgba(239, 68, 68, 0.08);
+  border-left: 3px solid rgba(239, 68, 68, 0.6);
+  padding-left: calc(var(--space-2) - 3px);
+  font-weight: 500;
+}
+.logResourceCap .logMessage {
+  color: #ef4444;
+}
+
 /* Scroll to bottom button */
 .scrollToBottom {
   position: absolute;

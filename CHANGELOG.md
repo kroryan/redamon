@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.0] - 2026-07-04
+
+### Added
+
+- **RAM-aware memory governor (host OOM protection)** ([graph_db/resource_governor.py](graph_db/resource_governor.py), [recon_orchestrator/admission_ledger.py](recon_orchestrator/admission_ledger.py), [container_manager.py](recon_orchestrator/container_manager.py), [docker_broker/broker.py](docker_broker/broker.py), [recon/project_settings.py](recon/project_settings.py), [agentic/project_settings.py](agentic/project_settings.py), [docker-compose.yml](docker-compose.yml), [redamon.sh](redamon.sh)). A dual-cap system that stops the host from running out of memory under concurrent scans + agent sessions. Every RAM-heavy knob keeps its configured ceiling **and** gains a second cap derived from live available memory (read from `/proc/meminfo`, VM-aware on Docker Desktop): concurrency/thread params scale by pressure ratio, while per-process/list units use a measured byte-budget. A **reservation ledger** admits recon scans only while their summed memory envelope fits a global budget, the excess is refused with a typed `hard`/`ram` reason instead of OOM-ing. **Every container is hard-capped**: compose `mem_limit`s + explicit neo4j JVM heap, per-spawn caps on scan containers, and 2 GB caps injected into sibling tool containers through the docker-broker. **Recon tool parameters** (~60 katana/nuclei/httpx/… knobs) and **agent concurrency** (fireteam members, plan-parallel tools, plus new WebSocket-session and background-job caps) throttle down under pressure, emitting red `[RESOURCE-CAP]` log lines. A startup RAM gate refuses to boot an undersized host, `mem_calibrate.py` measures real per-container envelopes into `resource_profile.json`, and the UI adds a bottom-bar htop-style RAM/CPU meter, red cap-log rendering in the recon drawer, and a memory-limit modal on refused scans. All knobs are env-overridable (documented in [.env.example](.env.example)) and fail-open. Covered by [tests/test_resource_governor.py](tests/test_resource_governor.py), [tests/test_admission_ledger.py](tests/test_admission_ledger.py), [tests/test_broker_inject.py](tests/test_broker_inject.py), [tests/test_recon_mem_governor.py](tests/test_recon_mem_governor.py), [tests/test_agent_mem_governor.py](tests/test_agent_mem_governor.py), and [tests/redamon_governor_test.sh](tests/redamon_governor_test.sh).
+
+---
+
 ---
 
 ## [5.2.1] - 2026-07-01

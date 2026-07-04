@@ -33,6 +33,29 @@ logger = logging.getLogger(__name__)
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
 
 
+def _governed_max_jobs() -> Optional[int]:
+    """Concurrent-background-job ceiling byte-budgeted to available RAM, or None to
+    not cap (governor disabled / unavailable). Each job is a real subprocess
+    (~measured envelope), so this uses the byte-budget model (not ratio) — safe on
+    small hosts. Generous base (MAX_BACKGROUND_JOBS, default 16). Fail-open."""
+    try:
+        from graph_db import resource_governor as rg
+    except Exception:
+        try:
+            import resource_governor as rg
+        except Exception:
+            return None
+    try:
+        if not rg.governor_enabled():
+            return None
+        base = int(os.environ.get("MAX_BACKGROUND_JOBS", "16") or "16")
+        env = rg.envelope("background_job_envelope_bytes")
+        frac = rg._env_float("AGENT_MEM_BUDGET_FRACTION", 0.5)
+        return rg.scaled_cap(base, env, frac, 1)
+    except Exception:
+        return None
+
+
 @dataclass
 class JobHandle:
     job_id: str
@@ -112,10 +135,13 @@ class JobRegistry:
         """Kick off a background tool execution. Returns synchronously."""
         if not project_id:
             return {"error": "project_id required"}
+        # Memory governor (Part 3): cap concurrent background jobs to available RAM
+        # (none existed before). Generous base, scaled down under pressure; the
+        # agent container mem_limit is the hard backstop. Fail-open.
+        cap = _governed_max_jobs()
         job_id = uuid.uuid4().hex
         started = datetime.now(timezone.utc).isoformat()
         log_path = self._log_path(project_id, job_id)
-        log_path.touch()
 
         handle = JobHandle(
             job_id=job_id,
@@ -127,8 +153,16 @@ class JobRegistry:
             started_at=started,
             output_path=str(log_path),
         )
+        # Count-and-insert atomically under the lock so two concurrent spawns
+        # can't both pass the cap and over-admit.
         async with self._lock:
+            if cap is not None:
+                active = sum(1 for h in self._jobs.values() if h.status == "running")
+                if active >= cap:
+                    return {"error": f"Too many background jobs running ({active}/{cap}); "
+                                     f"memory-limited, retry shortly.", "limitType": "ram"}
             self._jobs[job_id] = handle
+        log_path.touch()   # only after admission, so a rejected job leaves no file
         self._write_meta(handle)
 
         async def append_log(chunk: str) -> None:

@@ -24,6 +24,13 @@
   gap: var(--space-3);
 }
 
+/* Memory governor (Part 5): meters + version grouped bottom-right. */
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
 .copyright {
   font-size: var(--text-xs);
   color: var(--text-tertiary);

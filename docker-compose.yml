@@ -20,6 +20,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: redamon-postgres
+    mem_limit: ${POSTGRES_MEM:-1g}          # Memory governor (Part 4)
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-redamon}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-redamon_secret}
@@ -40,11 +41,18 @@ services:
   neo4j:
     image: neo4j:5.26-community
     container_name: redamon-neo4j
+    # Memory governor (Part 4): container hard cap MUST exceed heap + pagecache or
+    # the JVM is OOM-killed. redamon.sh export_resource_caps sizes these to the
+    # host; the defaults keep heap+pagecache (3G) well inside the 4.5G limit.
+    mem_limit: ${NEO4J_MEM:-4608m}
     environment:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-changeme123}
       NEO4J_PLUGINS: '["apoc"]'
       NEO4J_dbms_security_procedures_unrestricted: apoc.*
       NEO4J_dbms_security_procedures_allowlist: apoc.*
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP:-2g}
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP:-2g}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-1g}
     ports:
       - "${NEO4J_HTTP_PORT:-7474}:7474"
       - "${NEO4J_BOLT_PORT:-7687}:7687"
@@ -165,6 +173,7 @@ services:
   gvmd:
     image: registry.community.greenbone.net/community/gvmd:stable
     container_name: redamon-gvm-gvmd
+    mem_limit: ${GVMD_MEM:-3g}              # Memory governor (Part 4)
     restart: on-failure
     volumes:
       - gvmd_data:/var/lib/gvm
@@ -335,6 +344,10 @@ services:
       # Everything else (/, /etc, /root, the docker socket) is denied.
       DOCKER_BROKER_ALLOWED_BIND_PREFIXES: /tmp/redamon,${PWD:-/home/samuele/Progetti didattici/redamon}
       DOCKER_BROKER_ALLOWED_VOLUMES: nuclei-templates
+      # Memory governor (Part 4d): hard memory cap injected into every sibling
+      # tool container (katana/nuclei/httpx/...). Default ~2g; PIDS 0 = unset.
+      BROKER_TOOL_MEM_BYTES: ${BROKER_TOOL_MEM_BYTES:-2g}
+      BROKER_TOOL_PIDS: ${BROKER_TOOL_PIDS:-0}
     healthcheck:
       test: ["CMD-SHELL", "test -S /var/run/broker/docker.sock"]
       interval: 15s
@@ -345,6 +358,7 @@ services:
   recon-orchestrator:
     build: ./recon_orchestrator
     container_name: redamon-recon-orchestrator
+    mem_limit: ${RECON_ORCHESTRATOR_MEM:-1g}   # Memory governor (Part 4)
     ports:
       # V1 isolation: bind to host loopback only. Reachable from the host (debug)
       # but NOT from bridge containers via the gateway IP (closes the back door).
@@ -441,6 +455,7 @@ services:
       dockerfile: kali-sandbox/Dockerfile
       network: host
     container_name: redamon-kali
+    mem_limit: ${KALI_MEM:-1g}              # Memory governor (Part 4)
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -530,6 +545,7 @@ services:
       args:
         SKIP_KB: "${SKIP_KB:-false}"
     container_name: redamon-agent
+    mem_limit: ${AGENT_MEM:-3g}             # Memory governor (Part 4)
     env_file:
       - path: .env
         required: false
@@ -689,6 +705,7 @@ services:
       args:
         REDAMON_VERSION: "${REDAMON_VERSION:-0.0.0}"
     container_name: redamon-webapp
+    mem_limit: ${WEBAPP_MEM:-1g}            # Memory governor (Part 4)
     ports:
       - "${WEBAPP_PORT:-3000}:3000"
     environment:

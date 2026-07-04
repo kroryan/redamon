@@ -56,8 +56,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
+      const detail = errorData.detail
+      // Memory governor (Part 5): a structured limit payload {limitType, ...}
+      // becomes a tailored message + a `limit` field the UI modal keys off.
+      if (detail && typeof detail === 'object' && detail.limitType) {
+        const msg =
+          detail.limitType === 'hard'
+            ? `${detail.detail || 'Configured limit reached'}. This is a configured limit, not a memory issue${detail.settingName ? ` — increase ${detail.settingName} and restart` : ''}.`
+            : `${detail.detail || 'Not enough memory to start this scan now'}. This is a RAM limit — please retry once memory frees (finish or stop other running scans, or lower parallelism).`
+        return NextResponse.json({ error: msg, limit: detail }, { status: response.status })
+      }
       return NextResponse.json(
-        { error: errorData.detail || 'Failed to start recon' },
+        { error: (typeof detail === 'string' ? detail : null) || 'Failed to start recon' },
         { status: response.status }
       )
     }

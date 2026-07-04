@@ -584,14 +584,70 @@ def get_settings() -> dict[str, Any]:
     global _settings
     if _settings is not None:
         return _settings
-    # Return defaults until a project is loaded
+    # Return defaults until a project is loaded (governed too, so any early
+    # consumer still gets memory-scaled concurrency; fresh copy -> no compounding).
     logger.info("Using DEFAULT_AGENT_SETTINGS (no project loaded yet)")
-    return DEFAULT_AGENT_SETTINGS.copy()
+    return apply_memory_governor(DEFAULT_AGENT_SETTINGS.copy())
 
 
 # Singleton settings instance
 _settings: Optional[dict[str, Any]] = None
 _current_project_id: Optional[str] = None
+
+
+# =============================================================================
+# Memory governor (Part 3): BYTE-BUDGET the agent's CONCURRENCY knobs to the RAM
+# available when the turn starts. Each concurrent fireteam member (~512MB) and
+# plan-tool slot (~400MB) costs absolute megabytes, so ratio-scaling is wrong on
+# small hosts (2GB free on a 4GB host is ratio 0.5 -> no throttle -> OOM). The
+# byte-budget (available x fraction / envelope) caps by what actually fits; a
+# generous 0.5 fraction keeps the full value at reasonable RAM and throttles hard
+# only when memory is genuinely scarce.
+#
+# We scale CONCURRENCY (how many run at once), NOT FIRETEAM_MAX_MEMBERS (how many
+# a plan contains) — scaling membership would silently truncate a coordinated
+# plan across a resume. Reducing concurrency serializes members safely instead.
+#
+# Applied per turn via load_project_settings (fresh dict -> no compounding). NOTE:
+# this samples RAM at turn START, not per node; the agent/kali container mem_limits
+# (Part 4) backstop pressure that develops mid-run. Emits [RESOURCE-CAP] logs.
+# Fail-open.
+# =============================================================================
+_AGENT_BUDGET_KEYS = {
+    'FIRETEAM_MAX_CONCURRENT': ('fireteam_member_envelope_bytes', 1),
+    'PLAN_MAX_PARALLEL_TOOLS': ('plan_tool_slot_envelope_bytes', 1),
+}
+
+
+def apply_memory_governor(settings: dict[str, Any]) -> dict[str, Any]:
+    """Byte-budget agent concurrency keys to available RAM. Pure; fail-open."""
+    try:
+        from graph_db import resource_governor as rg
+    except Exception:
+        try:
+            import resource_governor as rg   # direct (tests / alt path)
+        except Exception:
+            return settings
+    try:
+        if not rg.governor_enabled():
+            return settings
+        frac = rg._env_float('AGENT_MEM_BUDGET_FRACTION', 0.5)
+    except Exception:
+        return settings
+
+    for key, (env_key, floor) in _AGENT_BUDGET_KEYS.items():
+        val = settings.get(key)
+        if isinstance(val, int) and not isinstance(val, bool) and val > 0:
+            try:
+                env = rg.envelope(env_key)
+                eff = rg.scaled_cap(val, env, frac, floor)
+            except Exception:
+                continue
+            if eff < val:
+                tool = 'fireteam' if key.startswith('FIRETEAM') else 'plan'
+                rg.log_cap(tool, key, val, eff, 'byte-budget')
+                settings[key] = eff
+    return settings
 
 
 def load_project_settings(project_id: str) -> dict[str, Any]:
@@ -614,21 +670,19 @@ def load_project_settings(project_id: str) -> dict[str, Any]:
     if not webapp_url:
         logger.warning("WEBAPP_API_URL not set, using DEFAULT_AGENT_SETTINGS")
         _settings = DEFAULT_AGENT_SETTINGS.copy()
-        _current_project_id = project_id
-        return _settings
+    else:
+        try:
+            _settings = fetch_agent_settings(project_id, webapp_url)
+            logger.info(f"Loaded {len(_settings)} agent settings from API for project {project_id}")
+        except Exception as e:
+            logger.error(f"Failed to fetch agent settings for project {project_id}: {e}")
+            logger.warning("Falling back to DEFAULT_AGENT_SETTINGS")
+            _settings = DEFAULT_AGENT_SETTINGS.copy()
 
-    try:
-        _settings = fetch_agent_settings(project_id, webapp_url)
-        _current_project_id = project_id
-        logger.info(f"Loaded {len(_settings)} agent settings from API for project {project_id}")
-        return _settings
-
-    except Exception as e:
-        logger.error(f"Failed to fetch agent settings for project {project_id}: {e}")
-        logger.warning("Falling back to DEFAULT_AGENT_SETTINGS")
-        _settings = DEFAULT_AGENT_SETTINGS.copy()
-        _current_project_id = project_id
-        return _settings
+    _current_project_id = project_id
+    # Memory governor (Part 3): scale concurrency to RAM available this turn.
+    _settings = apply_memory_governor(_settings)
+    return _settings
 
 
 def get_setting(key: str, default: Any = None) -> Any:

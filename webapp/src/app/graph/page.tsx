@@ -248,6 +248,7 @@ export default function GraphPage() {
     stopRecon,
     pauseRecon,
     resumeRecon,
+    getLastStartError,
   } = useReconStatus({
     projectId,
     enabled: !!projectId,
@@ -983,8 +984,23 @@ export default function GraphPage() {
       setIsReconModalOpen(false)
       setActiveLogsDrawer('recon')
       toast.info('Recon scan started')
+      return
     }
-  }, [startRecon, clearLogs, toast])
+    // Failed to start — surface a tailored modal (Part 5). Memory-governor
+    // rejections carry a structured limit; distinguish "configured limit" (raise
+    // a setting) from "RAM limit" (retry / free memory).
+    const startErr = getLastStartError?.()
+    if (startErr) {
+      setIsReconModalOpen(false)
+      const title =
+        startErr.limit?.limitType === 'hard'
+          ? 'Scan limit reached'
+          : startErr.limit?.limitType === 'ram'
+            ? 'Not enough memory'
+            : 'Could not start scan'
+      alertError(startErr.message, title)
+    }
+  }, [startRecon, clearLogs, toast, getLastStartError, alertError])
 
   const handleDownloadJSON = useCallback(async () => {
     if (!projectId) return

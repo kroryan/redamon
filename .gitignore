@@ -2,6 +2,12 @@
 agentic/agent-workspace/*
 !agentic/agent-workspace/.gitkeep
 
+# Memory-governor calibration output (host-specific measured envelopes). Each
+# host generates its own via `bash tests/redamon_mem_calibrate.sh`; the governor
+# falls back to safe built-in constants when absent. Never commit one host's
+# numbers for another host to inherit.
+**/resource_profile.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

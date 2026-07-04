@@ -14,6 +14,9 @@ import docker
 from docker.errors import NotFound, APIError
 from docker.models.containers import Container
 
+import resource_governor as rg
+from admission_ledger import ReservationLedger, AdmissionError
+
 from models import (
     ReconState, ReconStatus, ReconLogEvent,
     GvmState, GvmStatus, GvmLogEvent,
@@ -149,6 +152,134 @@ class ContainerManager:
         self.codefix_work_host_base: Optional[str] = None
         self.codefix_sandboxes: dict[str, dict] = {}
 
+        # Memory governor (Part 1): reserves each scan job's expected RAM envelope
+        # before spawning so concurrent scans can never sum past the host's scan
+        # pool. Fail-open: with the governor disabled, try_admit always admits.
+        self.ledger = ReservationLedger()
+
+    def _scan_key(self, kind: str, project_id: str, run_id: Optional[str] = None) -> str:
+        """Stable reservation key for a scan job."""
+        base = f"{kind}:{project_id}"
+        return f"{base}:{run_id}" if run_id else base
+
+    async def _admit_scan(self, kind: str, project_id: str, run_id: Optional[str] = None) -> str:
+        """Reserve RAM for a scan of `kind`; raise AdmissionError if it doesn't fit.
+        Returns the reservation key (release via reconcile / release_nowait)."""
+        key = self._scan_key(kind, project_id, run_id)
+        envelope = self.ledger.envelope_for(kind)
+        result = await self.ledger.try_admit(key, envelope)
+        if not result.admitted:
+            logger.info(f"[governor] admission denied for {key}: {result.limit_type} - {result.detail}")
+            raise AdmissionError(result)
+        logger.info(f"[governor] admitted {key} (envelope {envelope // (1024**2)} MB, "
+                    f"committed {self.ledger.committed_bytes() // (1024**2)} MB / "
+                    f"pool {self.ledger.scan_pool() // (1024**2)} MB)")
+        return key
+
+    def _active_scan_keys(self) -> set:
+        """All reservation keys whose scan is genuinely still RUNNING/STARTING.
+        Used by reconcile() to release reservations for finished/dead scans without
+        having to hook every terminal path (leak-proof)."""
+        keys = set()
+        for pid, st in self.running_states.items():
+            if st.status in (ReconStatus.RUNNING, ReconStatus.STARTING, ReconStatus.PAUSED):
+                keys.add(self._scan_key("full_recon", pid))
+        for pid, runs in self.partial_recon_states.items():
+            for rid, st in runs.items():
+                if st.status in (PartialReconStatus.RUNNING, PartialReconStatus.STARTING):
+                    keys.add(self._scan_key("partial_recon", pid, rid))
+        for pid, runs in self.ai_attack_states.items():
+            for rid, st in runs.items():
+                if st.status in (AiAttackSurfaceStatus.RUNNING, AiAttackSurfaceStatus.STARTING):
+                    keys.add(self._scan_key("ai_attack", pid, rid))
+        # PAUSED counts as active for all pausable types: the container stays
+        # resident holding RAM, and resume does not re-admit — dropping the
+        # reservation here would under-count and risk OOM on the next admit.
+        for pid, st in self.gvm_states.items():
+            if st.status in (GvmStatus.RUNNING, GvmStatus.STARTING, GvmStatus.PAUSED):
+                keys.add(self._scan_key("gvm", pid))
+        for pid, st in self.github_hunt_states.items():
+            if st.status in (GithubHuntStatus.RUNNING, GithubHuntStatus.STARTING, GithubHuntStatus.PAUSED):
+                keys.add(self._scan_key("github_hunt", pid))
+        for pid, st in self.trufflehog_states.items():
+            if st.status in (TrufflehogStatus.RUNNING, TrufflehogStatus.STARTING, TrufflehogStatus.PAUSED):
+                keys.add(self._scan_key("trufflehog", pid))
+        return keys
+
+    async def refresh_all_scan_states(self) -> None:
+        """Advance every scan's in-memory status by polling Docker, so reconcile()
+        sees terminal (COMPLETED/ERROR) states even when no client is polling the
+        status endpoints. Without this, a scan that finishes while its UI tab is
+        closed would hold its reservation until someone polls (false denials).
+        Each refresh is guarded so one failure can't abort the sweep."""
+        for pid in list(self.running_states.keys()):
+            try:
+                await self.get_status(pid)
+            except Exception:
+                pass
+        for pid in list(self.partial_recon_states.keys()):
+            try:
+                await self.get_all_partial_recon_statuses(pid)
+            except Exception:
+                pass
+        for pid in list(self.ai_attack_states.keys()):
+            try:
+                await self.get_all_ai_attack_surface_statuses(pid)
+            except Exception:
+                pass
+        for pid in list(self.gvm_states.keys()):
+            try:
+                await self.get_gvm_status(pid)
+            except Exception:
+                pass
+        for pid in list(self.github_hunt_states.keys()):
+            try:
+                await self.get_github_hunt_status(pid)
+            except Exception:
+                pass
+        for pid in list(self.trufflehog_states.keys()):
+            try:
+                await self.get_trufflehog_status(pid)
+            except Exception:
+                pass
+
+    def _container_mem_limit(self, kind: str) -> Optional[int]:
+        """Hard per-container memory ceiling (bytes) for a spawned scan, sized from
+        the job envelope × headroom and clamped to PER_CONTAINER_MAX so one
+        container can never take the whole host. Generous backstop: it sits ABOVE
+        the admission envelope so a normal peak is never killed, only a runaway.
+        Returns None (no limit) when the governor is disabled or RAM is unreadable."""
+        if not rg.governor_enabled():
+            return None
+        envelope = self.ledger.envelope_for(kind)
+        if envelope <= 0:
+            return None
+        headroom = rg._env_float("CONTAINER_CAP_HEADROOM", 1.5)
+        if headroom < 1.0:
+            headroom = 1.0
+        cap = int(envelope * headroom)
+        per_max = rg.env_bytes("PER_CONTAINER_MAX", None)
+        if per_max is None:
+            mem = rg.read_mem()
+            per_max = int(mem[0] * 0.55) if mem else cap
+        cap = min(cap, per_max)
+        # Never size the hard cap BELOW the admission envelope (the expected peak),
+        # or a normal run would be OOM-killed. On a host so small that per_max <
+        # envelope, admission would already have rejected this scan; if it somehow
+        # ran, the envelope floor still avoids a false kill.
+        floor = 512 * 1024 ** 2
+        return max(floor, envelope, cap)
+
+    def reconcile_reservations(self) -> int:
+        """Release reservations for scans that are no longer active. Call
+        periodically (reaper) so nothing leaks even if a spawn/terminal path is
+        missed. Returns count released."""
+        try:
+            return self.ledger.reconcile(self._active_scan_keys())
+        except Exception as e:
+            logger.warning(f"[governor] reconcile failed: {e}")
+            return 0
+
     def _get_container_name(self, project_id: str) -> str:
         """Generate container name for a project"""
         # Sanitize project_id for container name
@@ -233,6 +364,9 @@ class ContainerManager:
         # Mutual exclusion: block if any partial recon is running
         if self._count_active_partial_recons(project_id) > 0:
             raise ValueError(f"Partial recon(s) running for project {project_id}. Stop them first.")
+
+        # Memory admission (Part 1): reserve this scan's RAM envelope or reject.
+        await self._admit_scan("full_recon", project_id)
 
         # Clean up any existing container
         container_name = self._get_container_name(project_id)
@@ -322,6 +456,7 @@ class ContainerManager:
                     # ensure_templates_volume() before any nuclei pass.
                     "nuclei-templates": {"bind": "/opt/nuclei-templates-official", "mode": "ro"},
                 },
+                mem_limit=self._container_mem_limit("full_recon"),  # Memory governor (Part 4c)
                 command="python /app/recon/main.py",
             )
 
@@ -973,6 +1108,9 @@ class ContainerManager:
         run_id = str(uuid.uuid4())
         container_name = self._get_partial_container_name(project_id, run_id)
 
+        # Memory admission (Part 1): reserve this run's RAM envelope or reject.
+        await self._admit_scan("partial_recon", project_id, run_id)
+
         state = PartialReconState(
             project_id=project_id,
             run_id=run_id,
@@ -1050,6 +1188,7 @@ class ContainerManager:
                     # selector to read TEMPLATES-STATS.json.
                     "nuclei-templates": {"bind": "/opt/nuclei-templates-official", "mode": "ro"},
                 },
+                mem_limit=self._container_mem_limit("partial_recon"),  # Memory governor (Part 4c)
                 command="python /app/recon/partial_recon.py",
             )
 
@@ -1351,6 +1490,9 @@ class ContainerManager:
         container_name = self._get_ai_attack_container_name(project_id, run_id)
         tool = run_config.get("tool", "skeleton")
 
+        # Memory admission (Part 1): reserve this run's RAM envelope or reject.
+        await self._admit_scan("ai_attack", project_id, run_id)
+
         state = AiAttackSurfaceState(
             project_id=project_id, run_id=run_id, tool=tool,
             status=AiAttackSurfaceStatus.STARTING,
@@ -1401,6 +1543,7 @@ class ContainerManager:
 
             container = self.client.containers.run(
                 self.ai_attack_image,
+                mem_limit=self._container_mem_limit("ai_attack"),  # Memory governor (Part 4c)
                 name=container_name,
                 detach=True,
                 network_mode="host",
@@ -1726,6 +1869,9 @@ class ContainerManager:
         if current_state.status in (GvmStatus.RUNNING, GvmStatus.PAUSED):
             raise ValueError(f"GVM scan already active for project {project_id}")
 
+        # Memory admission (Part 1): reserve this scan's RAM envelope or reject.
+        await self._admit_scan("gvm", project_id)
+
         # Clean up any existing container
         container_name = self._get_gvm_container_name(project_id)
         try:
@@ -1759,6 +1905,7 @@ class ContainerManager:
             # Start container with environment variables
             container = self.client.containers.run(
                 self.gvm_image,
+                mem_limit=self._container_mem_limit("gvm"),  # Memory governor (Part 4c)
                 name=container_name,
                 detach=True,
                 network_mode="host",
@@ -2118,6 +2265,9 @@ class ContainerManager:
         if current_state.status in (GithubHuntStatus.RUNNING, GithubHuntStatus.PAUSED):
             raise ValueError(f"GitHub hunt already active for project {project_id}")
 
+        # Memory admission (Part 1): reserve this scan's RAM envelope or reject.
+        await self._admit_scan("github_hunt", project_id)
+
         # Clean up any existing container
         container_name = self._get_github_hunt_container_name(project_id)
         try:
@@ -2151,6 +2301,7 @@ class ContainerManager:
             # Start container with environment variables
             container = self.client.containers.run(
                 self.github_hunt_image,
+                mem_limit=self._container_mem_limit("github_hunt"),  # Memory governor (Part 4c)
                 name=container_name,
                 detach=True,
                 network_mode="host",
@@ -2496,6 +2647,9 @@ class ContainerManager:
         if current_state.status in (TrufflehogStatus.RUNNING, TrufflehogStatus.PAUSED):
             raise ValueError(f"TruffleHog scan already active for project {project_id}")
 
+        # Memory admission (Part 1): reserve this scan's RAM envelope or reject.
+        await self._admit_scan("trufflehog", project_id)
+
         # Clean up any existing container
         container_name = self._get_trufflehog_container_name(project_id)
         try:
@@ -2529,6 +2683,7 @@ class ContainerManager:
             # Start container with environment variables
             container = self.client.containers.run(
                 self.trufflehog_image,
+                mem_limit=self._container_mem_limit("trufflehog"),  # Memory governor (Part 4c)
                 name=container_name,
                 detach=True,
                 network_mode="host",

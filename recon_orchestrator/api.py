@@ -17,6 +17,17 @@ from sse_starlette.sse import EventSourceResponse
 
 from auth import is_orchestrator_request_authorized
 from container_manager import ContainerManager
+from admission_ledger import AdmissionError
+
+
+def _value_error_http(e: ValueError) -> "HTTPException":
+    """Map a ValueError from a start endpoint to a 409. For an AdmissionError
+    (memory governor), return the STRUCTURED limit payload (limitType/settingName/
+    ...) the Part 5 UI modal needs, instead of a plain string."""
+    from fastapi import HTTPException as _HTTPException
+    if isinstance(e, AdmissionError):
+        return _HTTPException(status_code=409, detail=e.result.payload())
+    return _HTTPException(status_code=409, detail=str(e))
 from local_llm_manager import LocalLlmManager
 from models import (
     HealthResponse,
@@ -180,6 +191,16 @@ async def _ai_attack_reaper():
                     await container_manager.reap_codefix_sandboxes()
                 except Exception as e:
                     logger.warning(f"CodeFix sandbox reaper iteration failed: {e}")
+                # Memory governor (Part 1): advance stale scan statuses from Docker,
+                # then release reservations for finished/dead scans so the ledger
+                # never leaks budget (even for scans whose UI never polled).
+                try:
+                    await container_manager.refresh_all_scan_states()
+                    released = container_manager.reconcile_reservations()
+                    if released:
+                        logger.info(f"[governor] reconciled {released} stale scan reservation(s)")
+                except Exception as e:
+                    logger.warning(f"Reservation reconcile iteration failed: {e}")
     except asyncio.CancelledError:
         pass
 
@@ -270,6 +291,22 @@ async def health_check():
         running_ai_attack_scans=container_manager.get_ai_attack_running_count() if container_manager else 0,
         gvm_available=container_manager.is_gvm_available() if container_manager else False,
     )
+
+
+@app.get("/system/stats")
+async def system_stats():
+    """Live host/VM memory + CPU for the governor UI (top-bar chip, bottom-bar
+    htop meters). Read-only, no secrets. `remaining_for_new` is the RAM actually
+    available to admit a new scan (Part 5)."""
+    import resource_governor as rg
+    # Read-only: no reconcile side-effect here (the reaper owns release timing);
+    # committed may lag by up to one reaper interval, which is fine for a display.
+    mem = container_manager.ledger.snapshot() if container_manager else {}
+    return {
+        "mem": mem,
+        "cpu": {"percent": round(rg.cpu_percent(), 1), "cores": rg.cpu_cores()},
+        "governor_enabled": rg.governor_enabled(),
+    }
 
 
 @app.get("/local-llm/status")
@@ -544,7 +581,7 @@ async def start_recon(project_id: str, request: ReconStartRequest):
         )
         return state
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise _value_error_http(e)
     except Exception as e:
         logger.error(f"Error starting recon: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -750,7 +787,7 @@ async def start_partial_recon(project_id: str, request: PartialReconStartRequest
         )
         return state
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise _value_error_http(e)
     except Exception as e:
         logger.error(f"Error starting partial recon: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1071,7 +1108,7 @@ async def start_ai_attack_surface(project_id: str, request: AiAttackSurfaceStart
         )
         return state
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise _value_error_http(e)
     except Exception as e:
         logger.error(f"Error starting AI attack surface: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1164,7 +1201,7 @@ async def start_gvm_scan(project_id: str, request: GvmStartRequest):
         )
         return state
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise _value_error_http(e)
     except Exception as e:
         logger.error(f"Error starting GVM scan: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1288,7 +1325,7 @@ async def start_github_hunt(project_id: str, request: GithubHuntStartRequest):
         )
         return state
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise _value_error_http(e)
     except Exception as e:
         logger.error(f"Error starting GitHub hunt: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1412,7 +1449,7 @@ async def start_trufflehog(project_id: str, request: TrufflehogStartRequest):
         )
         return state
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise _value_error_http(e)
     except Exception as e:
         logger.error(f"Error starting TruffleHog scan: {e}")
         raise HTTPException(status_code=500, detail=str(e))

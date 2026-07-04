@@ -12,6 +12,19 @@ interface UseReconStatusOptions {
   onError?: (error: string) => void
 }
 
+// Memory governor (Part 5): structured limit info from a rejected start.
+export interface ReconStartLimit {
+  limitType?: 'hard' | 'ram'
+  settingName?: string | null
+  detail?: string
+  current?: number
+  ceiling?: number
+}
+export interface ReconStartError {
+  message: string
+  limit?: ReconStartLimit
+}
+
 interface UseReconStatusReturn {
   state: ReconState | null
   isLoading: boolean
@@ -21,6 +34,9 @@ interface UseReconStatusReturn {
   stopRecon: () => Promise<ReconState | null>
   pauseRecon: () => Promise<ReconState | null>
   resumeRecon: () => Promise<ReconState | null>
+  // Synchronously-readable detail of the most recent failed startRecon(), for a
+  // tailored limit modal (read right after startRecon() resolves to null).
+  getLastStartError: () => ReconStartError | null
 }
 
 const DEFAULT_POLLING_INTERVAL = 5000 // 5 seconds when running
@@ -40,6 +56,7 @@ export function useReconStatus({
 
   const previousStatusRef = useRef<ReconStatus | null>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
+  const lastStartErrorRef = useRef<ReconStartError | null>(null)
 
   // Store callbacks in refs to avoid recreating fetchStatus
   const onStatusChangeRef = useRef(onStatusChange)
@@ -90,6 +107,7 @@ export function useReconStatus({
 
     setIsLoading(true)
     setError(null)
+    lastStartErrorRef.current = null
 
     try {
       const response = await fetch(`/api/recon/${projectId}/start`, {
@@ -97,7 +115,10 @@ export function useReconStatus({
       })
 
       if (!response.ok) {
-        const data = await response.json()
+        const data = await response.json().catch(() => ({}))
+        // Capture structured limit info (Part 5) before throwing, so the caller
+        // can show a tailored modal.
+        lastStartErrorRef.current = { message: data.error || 'Failed to start recon', limit: data.limit }
         throw new Error(data.error || 'Failed to start recon')
       }
 
@@ -108,6 +129,7 @@ export function useReconStatus({
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+      if (!lastStartErrorRef.current) lastStartErrorRef.current = { message: errorMessage }
       setError(errorMessage)
       onErrorRef.current?.(errorMessage)
       return null
@@ -116,6 +138,8 @@ export function useReconStatus({
       setIsLoading(false)
     }
   }, [projectId])
+
+  const getLastStartError = useCallback(() => lastStartErrorRef.current, [])
 
   const stopRecon = useCallback(async (): Promise<ReconState | null> => {
     if (!projectId) return null
@@ -250,6 +274,7 @@ export function useReconStatus({
     stopRecon,
     pauseRecon,
     resumeRecon,
+    getLastStartError,
   }
 }
 

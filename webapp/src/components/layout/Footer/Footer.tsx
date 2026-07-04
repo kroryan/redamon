@@ -4,6 +4,7 @@ import { Scale, ArrowUpCircle } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { DISCLAIMER_GITHUB_URL } from '@/lib/disclaimerVersion'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
+import { SystemMeter } from '@/components/system/SystemMeter'
 import styles from './Footer.module.css'
 
 export function Footer() {
@@ -28,18 +29,21 @@ export function Footer() {
             Legal & Terms of Use
           </a>
         </div>
-        <div className={styles.versionWrapper}>
-          {updateAvailable && latestVersion && (
-            <button
-              className={styles.updateBadge}
-              onClick={() => router.push('/settings?tab=system')}
-              title={`Update to v${latestVersion}`}
-            >
-              <ArrowUpCircle size={12} />
-              v{latestVersion} available
-            </button>
-          )}
-          <span className={styles.version}>v{currentVersion}</span>
+        <div className={styles.right}>
+          <SystemMeter />
+          <div className={styles.versionWrapper}>
+            {updateAvailable && latestVersion && (
+              <button
+                className={styles.updateBadge}
+                onClick={() => router.push('/settings?tab=system')}
+                title={`Update to v${latestVersion}`}
+              >
+                <ArrowUpCircle size={12} />
+                v{latestVersion} available
+              </button>
+            )}
+            <span className={styles.version}>v{currentVersion}</span>
+          </div>
         </div>
       </div>
     </footer>

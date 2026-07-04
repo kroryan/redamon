@@ -198,6 +198,62 @@ def validate_create(body: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+# --------------------------------------------------------------------------
+# Memory governor (Part 4d): inject a hard memory cap into every sibling tool
+# container the recon pipeline spawns. These are separate top-level containers,
+# so the recon container's own mem_limit can't reach them — the broker is the
+# only choke point. Additive to the security filtering above; never relaxes it.
+# --------------------------------------------------------------------------
+def _parse_size(s: str, default: int) -> int:
+    """Parse '2g'/'512m'/'1073741824' to bytes; default on empty/invalid."""
+    s = (s or "").strip().lower()
+    if not s:
+        return default
+    if s.endswith("b"):
+        s = s[:-1].strip()
+    mult = 1
+    if s and s[-1] in ("k", "m", "g", "t"):
+        mult = {"k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}[s[-1]]
+        s = s[:-1].strip()
+    try:
+        val = int(float(s) * mult)
+    except (TypeError, ValueError):
+        return default
+    return val if val >= 0 else default   # a typo'd negative must not silently disable the cap
+
+
+def _parse_int(s: str, default: int) -> int:
+    """Parse a plain integer env var; default on empty/invalid (never crash import)."""
+    try:
+        return int(str(s).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+BROKER_TOOL_MEM = _parse_size(os.environ.get("BROKER_TOOL_MEM_BYTES", ""), 2 * 1024**3)
+# Defensive parse: a non-integer (e.g. "512m") must not crash the broker at import,
+# which would leave recon unable to spawn ANY tool container.
+BROKER_TOOL_PIDS = max(0, _parse_int(os.environ.get("BROKER_TOOL_PIDS", "0"), 0))  # 0 = don't set
+
+
+def inject_limits(cfg: dict) -> dict:
+    """Add HostConfig.Memory (and optionally PidsLimit) if absent or larger than
+    our cap — respect a lower explicit value. Mutates and returns cfg."""
+    hc = cfg.get("HostConfig")
+    if not isinstance(hc, dict):
+        hc = {}
+        cfg["HostConfig"] = hc
+    if BROKER_TOOL_MEM > 0:
+        cur = hc.get("Memory") or 0
+        if cur == 0 or cur > BROKER_TOOL_MEM:
+            hc["Memory"] = BROKER_TOOL_MEM
+    if BROKER_TOOL_PIDS > 0:
+        cur = hc.get("PidsLimit") or 0
+        if cur == 0 or cur > BROKER_TOOL_PIDS:
+            hc["PidsLimit"] = BROKER_TOOL_PIDS
+    return cfg
+
+
 def validate_pull(path: str) -> tuple[bool, str]:
     """Validate docker pull (POST /images/create?fromImage=...&tag=...)."""
     q = path.split("?", 1)[1] if "?" in path else ""
@@ -291,6 +347,7 @@ async def handle_client(client_reader, client_writer):
 
         # ---- read body (Content-Length) for validation/forwarding ----
         body = b""
+        body_modified = False   # set when we rewrite the create body (Part 4d)
         clen = int(headers.get("content-length", "0") or "0")
         if clen > 8 * 1024 * 1024:  # create configs are tiny; cap to avoid a memory DoS
             _reject("request body too large")
@@ -316,7 +373,12 @@ async def handle_client(client_reader, client_writer):
                 _reject(reason)
                 await client_writer.drain()
                 return
-            _log(f"ALLOW create image={cfg.get('Image')!r}")
+            # Memory governor (Part 4d): inject the hard mem cap, then re-serialize
+            # the body (Content-Length is corrected in the head rebuild below).
+            inject_limits(cfg)
+            body = json.dumps(cfg).encode("utf-8")
+            body_modified = True
+            _log(f"ALLOW create image={cfg.get('Image')!r} mem={cfg.get('HostConfig', {}).get('Memory')}")
 
         # ---- validate docker pull (deny = no upstream contact) ----
         if method == "POST" and _IMAGES_CREATE_RE.match(path_only):
@@ -328,11 +390,19 @@ async def handle_client(client_reader, client_writer):
                 return
 
         # ---- allowed: NOW connect upstream and forward ----
-        # rebuild head with Connection: close to avoid keep-alive request smuggling
+        # rebuild head with Connection: close to avoid keep-alive request smuggling.
+        # If we rewrote the body (Part 4d), also drop the stale Content-Length and
+        # set the correct one — a mismatch would hang or corrupt the upstream call.
         head_text = head.split(b"\r\n\r\n", 1)[0].decode("latin1")
         head_lines = [ln for ln in head_text.split("\r\n")
-                      if not ln.lower().startswith("connection:")]
+                      if not ln.lower().startswith("connection:")
+                      and not (body_modified and (ln.lower().startswith("content-length:")
+                                                  or ln.lower().startswith("transfer-encoding:")))]
         head_lines.append("Connection: close")
+        if body_modified:
+            # We send a concrete Content-Length, so any prior Transfer-Encoding
+            # (dropped above) must not coexist with it.
+            head_lines.append(f"Content-Length: {len(body)}")
         new_head = ("\r\n".join(head_lines) + "\r\n\r\n").encode("latin1")
         up_reader, up_writer = await asyncio.open_unix_connection(UPSTREAM_SOCK)
         up_writer.write(new_head + body)

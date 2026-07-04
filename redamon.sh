@@ -205,6 +205,159 @@ maybe_warn_low_memory() {
     fi
 }
 
+# =============================================================================
+# Memory governor (Part 4): startup RAM gate + adaptive per-service cap export.
+# Both reuse detect_build_resources() (docker info / /proc / sysctl) so the
+# figures match the rest of this script. Sizes accept g/m/k suffixes or bytes.
+# =============================================================================
+
+# Convert a Docker-style size ("2g","2048m","1073741824") to whole MB. Empty on
+# invalid input. Plain numbers are bytes (matches resource_governor.parse_size).
+_size_to_mb() {
+    local v="${1:-}"
+    v="$(printf '%s' "$v" | tr 'A-Z' 'a-z' | tr -d ' ')"
+    [[ -z "$v" ]] && { printf ''; return; }
+    v="${v%b}"                              # tolerate trailing 'b' (e.g. 512mb)
+    local unit="" num="$v"
+    case "$v" in
+        *k) unit=k; num="${v%k}" ;;
+        *m) unit=m; num="${v%m}" ;;
+        *g) unit=g; num="${v%g}" ;;
+        *t) unit=t; num="${v%t}" ;;
+    esac
+    # Allow a decimal (e.g. 1.5g, 0.5g); plain number = bytes.
+    [[ "$num" =~ ^[0-9]+([.][0-9]+)?$ ]] || { printf ''; return; }
+    # awk keeps the fraction ('1.5g' -> 1536), which pure bash integer math loses.
+    awk -v n="$num" -v u="$unit" 'BEGIN{
+        m = (u=="k")?1024 : (u=="m")?1048576 : (u=="g")?1073741824 : (u=="t")?1099511627776 : 1;
+        printf "%d", int(n*m/1048576);
+    }'
+}
+
+# Refuse to start when the host/VM can't hold the always-on core services, with
+# a clear message, instead of failing mysteriously later. Returns 1 to abort.
+# Override with REDAMON_SKIP_RAM_GATE=1 or REDAMON_MIN_RAM_MB=<mb>.
+preflight_ram_gate() {
+    [[ "${REDAMON_SKIP_RAM_GATE:-}" == "1" ]] && return 0
+    detect_build_resources
+    local required_mb baseline_mb headroom_mb
+    if [[ -n "${REDAMON_MIN_RAM_MB:-}" ]]; then
+        required_mb="${REDAMON_MIN_RAM_MB//[^0-9]/}"
+    else
+        baseline_mb="$(_size_to_mb "${SERVICE_BASELINE_MEM:-6g}")"; [[ -z "$baseline_mb" ]] && baseline_mb=6144
+        headroom_mb="$(_size_to_mb "${OS_HEADROOM_MEM:-2g}")";      [[ -z "$headroom_mb" ]] && headroom_mb=2048
+        required_mb=$(( baseline_mb + headroom_mb ))
+    fi
+    [[ -z "$required_mb" || "$required_mb" -le 0 ]] && return 0
+    # ~512MB slack: docker-info MemTotal on a physical 8GB host reads ~7.7GB
+    # (kernel/reserved), which should still pass an 8GB requirement.
+    local threshold=$(( required_mb - 512 ))
+    [[ "$threshold" -lt 0 ]] && threshold="$required_mb"
+    if [[ "${BUILD_MEM_MB:-0}" -gt 0 && "$BUILD_MEM_MB" -lt "$threshold" ]]; then
+        error "Insufficient memory for RedAmon core services: ~$(( BUILD_MEM_MB / 1024 ))GB available to Docker (source: ${BUILD_RES_SOURCE}), need ~$(( required_mb / 1024 ))GB."
+        error "Free up memory, raise the Docker VM memory, or set REDAMON_SKIP_RAM_GATE=1 to override."
+        return 1
+    fi
+    return 0
+}
+
+# Export a clamped "<mb>m" cap for VAR unless the user already set it.
+_export_clamped_cap() {
+    local var="$1" val="$2" floor="$3" ceil="$4"
+    [[ -n "${!var:-}" ]] && return 0          # respect explicit override
+    [[ "$val" -lt "$floor" ]] && val="$floor"
+    [[ "$val" -gt "$ceil" ]] && val="$ceil"
+    export "$var=${val}m"
+}
+
+# Derive per-service memory caps from detected RAM and export them so
+# docker-compose.yml `${VAR:-default}` picks them up. Always-on services get a
+# static generous cap sized to the host (Part 4). No-op if RAM undetectable.
+export_resource_caps() {
+    detect_build_resources
+    [[ "${BUILD_MEM_MB:-0}" -le 0 ]] && return 0
+    local t="$BUILD_MEM_MB"
+    # neo4j: the container mem_limit MUST exceed heap + pagecache or the JVM gets
+    # OOM-killed. Derive NEO4J_MEM from the (clamped) heap+pagecache plus JVM
+    # overhead headroom (metaspace, threads, direct buffers), never an
+    # independent fraction that could land below heap+pagecache.
+    local heap_mb pc_mb neo_mb eff_heap eff_pc
+    heap_mb=$(( t * 15 / 100 )); [[ "$heap_mb" -lt 512 ]] && heap_mb=512; [[ "$heap_mb" -gt 4096 ]] && heap_mb=4096
+    pc_mb=$(( t * 10 / 100 ));   [[ "$pc_mb"   -lt 512 ]] && pc_mb=512;   [[ "$pc_mb"   -gt 4096 ]] && pc_mb=4096
+    # Derive the container limit from the EFFECTIVE heap/pagecache (a user's
+    # NEO4J_HEAP override wins), or it could land below the JVM heap -> OOM at boot.
+    eff_heap="$(_size_to_mb "${NEO4J_HEAP:-${heap_mb}m}")"; [[ -z "$eff_heap" ]] && eff_heap="$heap_mb"
+    eff_pc="$(_size_to_mb "${NEO4J_PAGECACHE:-${pc_mb}m}")"; [[ -z "$eff_pc" ]] && eff_pc="$pc_mb"
+    neo_mb=$(( eff_heap + eff_pc + 1024 ))
+    [[ -z "${NEO4J_HEAP:-}" ]]      && export NEO4J_HEAP="${heap_mb}m"
+    [[ -z "${NEO4J_PAGECACHE:-}" ]] && export NEO4J_PAGECACHE="${pc_mb}m"
+    [[ -z "${NEO4J_MEM:-}" ]]       && export NEO4J_MEM="${neo_mb}m"
+    _export_clamped_cap AGENT_MEM         $(( t * 12 / 100 )) 1024 4096
+    _export_clamped_cap GVMD_MEM          $(( t * 12 / 100 )) 1024 3072
+    _export_clamped_cap RECON_ORCHESTRATOR_MEM $(( t * 5 / 100 )) 512 2048
+    _export_clamped_cap WEBAPP_MEM        $(( t * 6 / 100 )) 512  2048
+    _export_clamped_cap POSTGRES_MEM      $(( t * 6 / 100 )) 512  2048
+    _export_clamped_cap KALI_MEM          $(( t * 6 / 100 )) 512  2048
+}
+
+# Optional one-time compressed-RAM (zram) swap cushion so brief memory overshoots
+# degrade gracefully (swap to compressed RAM) instead of OOM-killing. Linux-native
+# host only; a NO-OP on macOS/Windows (Docker Desktop's VM manages its own swap)
+# and when REDAMON_ENABLE_ZRAM != 1. Best-effort: never fatal, never interactive.
+setup_zram() {
+    [[ "${REDAMON_ENABLE_ZRAM:-}" == "1" ]] || return 0
+
+    # Docker Desktop / WSL2 / mac: cannot add zram to the host VM from here.
+    case "$(uname -s 2>/dev/null || echo unknown)" in
+        Linux) ;;
+        *) info "zram: skipped (not a native Linux host)"; return 0 ;;
+    esac
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        info "zram: skipped (WSL2 manages its own memory)"; return 0
+    fi
+    # Already have zram swap active? Leave it.
+    if swapon --show=NAME --noheadings 2>/dev/null | grep -q zram; then
+        info "zram: already active"; return 0
+    fi
+    if ! command -v zramctl >/dev/null 2>&1; then
+        warn "zram: zramctl not found; skipping (install util-linux/zram-tools to enable)"; return 0
+    fi
+
+    detect_build_resources
+    local size="${REDAMON_ZRAM_SIZE:-}"
+    if [[ -z "$size" ]]; then
+        if [[ "${BUILD_MEM_MB:-0}" -le 0 ]]; then
+            warn "zram: cannot size (RAM undetectable); set REDAMON_ZRAM_SIZE to enable"; return 0
+        fi
+        # Default: half of detected RAM, clamped to [512M, 8G].
+        local half=$(( BUILD_MEM_MB / 2 ))
+        [[ "$half" -gt 8192 ]] && half=8192
+        [[ "$half" -lt 512 ]] && half=512
+        size="${half}M"
+    fi
+
+    # Requires root; use sudo non-interactively so we never hang on a password.
+    local SUDO=""
+    if [[ "$(id -u)" != "0" ]]; then
+        if sudo -n true 2>/dev/null; then SUDO="sudo -n"; else
+            warn "zram: needs root and passwordless sudo is unavailable; skipping"; return 0
+        fi
+    fi
+
+    local dev
+    if dev="$($SUDO zramctl --find --size "$size" --algorithm zstd 2>/dev/null)" && [[ -n "$dev" ]]; then
+        if $SUDO mkswap "$dev" >/dev/null 2>&1 && $SUDO swapon --priority 100 "$dev" 2>/dev/null; then
+            success "zram: enabled ${size} compressed swap on ${dev}"
+        else
+            warn "zram: failed to enable swap on ${dev}; cleaning up"
+            $SUDO zramctl --reset "$dev" 2>/dev/null || true
+        fi
+    else
+        warn "zram: could not allocate a zram device; skipping"
+    fi
+    return 0
+}
+
 # Memory-safe replacement for `docker compose ... build ...`. Pass exactly the
 # args that would follow `docker compose`, e.g.:
 #   compose_build --profile tools build
@@ -1056,8 +1209,18 @@ cmd_update() {
         docker image prune -f >/dev/null 2>&1 || true
     fi
 
-    # Restart rebuilt core services (tool images are build-only, not running)
-    if [[ ${#rebuild_core[@]} -gt 0 ]]; then
+    # Restart rebuilt core services (tool images are build-only, not running).
+    # When docker-compose.yml changed (rebuild_all), recreate ALL core services so
+    # compose-level changes — e.g. the memory-governor mem_limits + neo4j heap —
+    # reach the NON-rebuilt ones too (neo4j, postgres). A per-service --no-deps loop
+    # would skip those. export_resource_caps first so the adaptive per-service caps
+    # are applied, matching `up`.
+    if [[ "$rebuild_all" == "true" ]]; then
+        info "Recreating core services to apply docker-compose.yml changes..."
+        export_resource_caps
+        # shellcheck disable=SC2086
+        docker compose up -d $CORE_SERVICES
+    elif [[ ${#rebuild_core[@]} -gt 0 ]]; then
         info "Restarting rebuilt services..."
         for svc in "${rebuild_core[@]}"; do
             docker compose up -d --no-deps "$svc"
@@ -1175,6 +1338,14 @@ cmd_up() {
     if is_gvm_enabled; then
         gvm_mode="true"
     fi
+
+    # Memory governor (Part 4): refuse to start if the host can't hold the core
+    # services, and export adaptive per-service memory caps for docker-compose.
+    if ! preflight_ram_gate; then
+        exit 1
+    fi
+    export_resource_caps
+    setup_zram   # optional one-time compressed-swap cushion (REDAMON_ENABLE_ZRAM=1)
 
     ensure_tool_images
     ensure_auth_secrets

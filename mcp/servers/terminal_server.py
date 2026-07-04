@@ -10,6 +10,7 @@ Runs on port 8016 inside the kali-sandbox container.
 import asyncio
 import fcntl
 import os
+import sys
 import pty
 import signal
 import struct
@@ -27,13 +28,39 @@ _active_sessions = 0
 _session_lock = asyncio.Lock()
 
 
+def _effective_max_sessions() -> int:
+    """MAX_SESSIONS, further reduced under memory pressure by the resource
+    governor when available. Byte-budget on the measured terminal-session
+    envelope. Fail-open to MAX_SESSIONS (governor absent/disabled)."""
+    try:
+        from graph_db import resource_governor as rg
+    except Exception:
+        try:
+            # Functional fallback: graph_db lives beside mcp_servers (…/graph_db).
+            _gd = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "graph_db")
+            if _gd not in sys.path:
+                sys.path.insert(0, _gd)
+            import resource_governor as rg
+        except Exception:
+            return MAX_SESSIONS
+    try:
+        if not rg.governor_enabled():
+            return MAX_SESSIONS
+        env = rg.envelope("mcp_terminal_session_envelope_bytes")
+        frac = rg._env_float("AGENT_MEM_BUDGET_FRACTION", 0.5)
+        return max(1, min(MAX_SESSIONS, rg.scaled_cap(MAX_SESSIONS, env, frac, 1)))
+    except Exception:
+        return MAX_SESSIONS
+
+
 async def _pty_session(ws):
     """Handle a single WebSocket connection with a PTY bash shell."""
     global _active_sessions
 
     async with _session_lock:
-        if _active_sessions >= MAX_SESSIONS:
-            logger.warning("Max sessions (%d) reached, rejecting connection", MAX_SESSIONS)
+        eff_max = _effective_max_sessions()
+        if _active_sessions >= eff_max:
+            logger.warning("Max sessions (%d) reached, rejecting connection", eff_max)
             await ws.close(1013, "Max terminal sessions reached")
             return
         _active_sessions += 1

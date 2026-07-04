@@ -157,6 +157,11 @@ export function ReconLogsDrawer({
     logText.includes('[Targets]') &&
     (logText.includes('Merged ') || logText.includes('No targets'))
 
+  // Memory governor (Part 5): the pipeline emits "[RESOURCE-CAP] <tool> <PARAM>
+  // <env> -> <eff> ..." whenever it throttles a parameter to fit available RAM.
+  // Render those red so the user plainly sees when/what was capped.
+  const isResourceCapLine = (logText: string) => logText.includes('[RESOURCE-CAP]')
+
   return (
     <div className={`${styles.drawer} ${isOpen ? styles.drawerOpen : ''}`}>
       {/* Header */}
@@ -257,7 +262,7 @@ export function ReconLogsDrawer({
                 key={index}
                 className={`${styles.logLine} ${getLogClassName(log.level)}${
                   isTargetsLine(log.log) ? ` ${styles.logTargets}` : ''
-                }`}
+                }${isResourceCapLine(log.log) ? ` ${styles.logResourceCap}` : ''}`}
               >
                 <span className={styles.logTimestamp}>
                   {new Date(log.timestamp).toLocaleTimeString()}

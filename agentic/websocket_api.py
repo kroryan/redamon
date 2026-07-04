@@ -31,6 +31,31 @@ def serialize_for_json(obj):
 logger = logging.getLogger(__name__)
 
 
+def _governed_max_sessions():
+    """Concurrent agent-session ceiling byte-budgeted to available RAM, or None to
+    not cap. Each session holds a full agent state (~measured envelope), so this
+    uses the byte-budget model (not ratio) — safe on small hosts. Generous base
+    (MAX_AGENT_SESSIONS, default 20). The agent mem_limit is the hard backstop.
+    Fail-open."""
+    import os
+    try:
+        from graph_db import resource_governor as rg
+    except Exception:
+        try:
+            import resource_governor as rg
+        except Exception:
+            return None
+    try:
+        if not rg.governor_enabled():
+            return None
+        base = int(os.environ.get("MAX_AGENT_SESSIONS", "20") or "20")
+        env = rg.envelope("agent_session_envelope_bytes")
+        frac = rg._env_float("AGENT_MEM_BUDGET_FRACTION", 0.5)
+        return rg.scaled_cap(base, env, frac, 1)
+    except Exception:
+        return None
+
+
 # =============================================================================
 # MESSAGE TYPE DEFINITIONS
 # =============================================================================
@@ -283,9 +308,29 @@ class WebSocketManager:
             connection.user_id = user_id
             connection.project_id = project_id
             connection.session_id = session_id
-            connection.authenticated = True
 
-            session_key = connection.get_key()
+            # Compute the key DIRECTLY (not via get_key(), which returns None until
+            # authenticated=True is set below) so the cap check + registration use
+            # the real key, not None.
+            session_key = f"{user_id}:{project_id}:{session_id}"
+
+            # Memory governor (Part 3): cap concurrent NEW sessions to available
+            # RAM (none existed before). Reconnects to an existing key are always
+            # allowed. On rejection we close the socket and leave authenticated
+            # False, so the caller's existing `if not authenticated` guard applies.
+            if session_key not in self.active_connections:
+                cap = _governed_max_sessions()
+                if cap is not None and len(self.active_connections) >= cap:
+                    logger.warning(f"session cap reached ({len(self.active_connections)}/{cap}); "
+                                   f"rejecting new session {session_key}")
+                    try:
+                        await connection.websocket.close(
+                            code=1013, reason="Server busy (low memory) - retry shortly")
+                    except Exception:
+                        pass
+                    return
+
+            connection.authenticated = True
 
             # Transfer running task from old connection if reconnecting
             if session_key in self.active_connections:
@@ -949,6 +994,12 @@ class WebSocketHandler:
                 init_msg.project_id,
                 init_msg.session_id
             )
+
+            # authenticate() rejects (and closes the socket) when the memory
+            # governor's session cap is hit, leaving authenticated False. Don't
+            # proceed to send CONNECTED on a closed/unauthenticated socket.
+            if not connection.authenticated:
+                return
 
             # Store graph view scope (if provided)
             connection.graph_view_cypher = init_msg.graph_view_cypher

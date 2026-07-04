@@ -12,6 +12,11 @@ services:
     build: !reset null
     image: node:22-alpine
     working_dir: /app
+    # Dev override: `next dev --turbopack` compiles on-demand and needs FAR more
+    # memory than the prod `next start`. The base service's 1g memory-governor cap
+    # would starve/kill the dev compiler ("Failed to fetch" / never compiles), so
+    # relax it generously here. This only affects `up dev`.
+    mem_limit: ${WEBAPP_DEV_MEM:-4g}
     command: sh -c "npm install && npx prisma db push --accept-data-loss && npm run dev"
     volumes:
       - ./webapp:/app
