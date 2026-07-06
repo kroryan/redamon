@@ -62,6 +62,41 @@ _TRANSIENT_KEYWORDS = (
 # because it's rate-limit, retry-worthy.
 _TRANSIENT_STATUS_RE = re.compile(r"\b(429|500|502|503|504|529)\b")
 
+# Some models reject the `temperature` sampling param with a permanent 400:
+#   * Anthropic 4.7+/5:  "`temperature` is deprecated for this model."
+#   * OpenAI o-series:   "Unsupported value: 'temperature' ... does not support ..."
+# This is NOT transient, but it IS auto-recoverable: drop temperature and retry.
+# Handling it here means any current or future model that stops accepting the
+# param works without maintaining a per-model allowlist.
+_TEMPERATURE_UNSUPPORTED_HINTS = (
+    "deprecated", "unsupported", "not supported", "does not support",
+)
+
+
+def _is_temperature_unsupported_error(exc: BaseException) -> bool:
+    s = str(exc).lower()
+    return "temperature" in s and any(h in s for h in _TEMPERATURE_UNSUPPORTED_HINTS)
+
+
+def _without_temperature(llm: Any) -> Any:
+    """Return a copy of the chat model with `temperature` removed (set to None,
+    which LangChain omits from the request), or None if a copy can't be made.
+
+    LangChain chat models are pydantic; ``model_copy`` (v2) is preferred, with a
+    shallow-copy fallback for older cores. Never mutates the original ``llm``.
+    """
+    try:
+        return llm.model_copy(update={"temperature": None})
+    except Exception:
+        pass
+    try:
+        import copy
+        clone = copy.copy(llm)
+        clone.temperature = None
+        return clone
+    except Exception:
+        return None
+
 
 def is_transient_llm_error(exc: BaseException) -> bool:
     """Classify an LLM-call exception as transient (worth retrying) or not.
@@ -101,11 +136,30 @@ async def retry_llm_call(
     can be disambiguated in the log stream.
     """
     last_exc: BaseException | None = None
+    healed_temperature = False
     for attempt in range(max_attempts):
         try:
             return await llm.ainvoke(messages)
         except Exception as exc:
             last_exc = exc
+            # Self-heal (once): a model that rejects `temperature` raises a
+            # permanent 400. Strip the param and immediately retry so any such
+            # model/provider works without a per-model allowlist. If the retry
+            # still fails, fall through to normal classification of that error.
+            if (not healed_temperature) and _is_temperature_unsupported_error(exc):
+                neutered = _without_temperature(llm)
+                if neutered is not None:
+                    healed_temperature = True
+                    llm = neutered
+                    logger.warning(
+                        "[%s] model rejected `temperature`; retrying without it.",
+                        label,
+                    )
+                    try:
+                        return await llm.ainvoke(messages)
+                    except Exception as exc2:
+                        last_exc = exc2
+                        exc = exc2
             transient = is_transient_llm_error(exc)
             logger.warning(
                 "[%s] LLM attempt %d/%d error (transient=%s, type=%s): %s",

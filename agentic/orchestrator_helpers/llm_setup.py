@@ -12,17 +12,33 @@ from orchestrator_helpers.llm_url_guard import validate_llm_base_url
 logger = logging.getLogger(__name__)
 
 # Anthropic models that reject the `temperature` parameter (HTTP 400
-# "temperature is deprecated for this model"). Add new model IDs here as
-# Anthropic deprecates the param on subsequent generations.
+# "temperature is deprecated for this model"). Anthropic deprecated the param
+# from the 4.7 / 4.6 generation onward and rejects it on every newer model.
 ANTHROPIC_NO_TEMPERATURE_MODELS = {
     "claude-opus-4-7",
     "claude-sonnet-4-7",
     "claude-haiku-4-6",
+    "claude-opus-4-8",
 }
+
+# Prefix families that reject `temperature` regardless of any date- or
+# context-window suffix (e.g. "claude-opus-4-8-20260115", "claude-opus-4-8[1m]",
+# "claude-sonnet-5-...")). Anthropic's deprecation is one-directional — newer
+# generations keep dropping the param — so match whole families by prefix. This
+# is the fast path; retry_llm_call self-heals anything not covered here.
+ANTHROPIC_NO_TEMPERATURE_PREFIXES = (
+    "claude-opus-4-8",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-haiku-5",
+    "claude-fable-5",
+)
 
 
 def _anthropic_supports_temperature(model_id: str) -> bool:
-    return model_id not in ANTHROPIC_NO_TEMPERATURE_MODELS
+    if model_id in ANTHROPIC_NO_TEMPERATURE_MODELS:
+        return False
+    return not any(model_id.startswith(p) for p in ANTHROPIC_NO_TEMPERATURE_PREFIXES)
 
 
 def parse_model_provider(model_name: str) -> tuple[str, str]:
