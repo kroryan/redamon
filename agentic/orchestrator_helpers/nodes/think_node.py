@@ -1624,6 +1624,12 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
                 updates["_decision"]["action"] = "use_tool"
             else:
                 logger.info(f"[{user_id}/{project_id}/{session_id}] No tool specified, looping back to think")
+                updates["messages"] = [HumanMessage(
+                    content=f"[system] You are ALREADY in the {phase} phase — that transition was a "
+                            f"no-op and did NOT end anything. Do NOT request transition_phase to "
+                            f"{phase} again. Proceed with the next concrete step of your workflow "
+                            f"(probe/build/submit your payload)."
+                )]
             return updates
 
         # Also ignore if we JUST transitioned to this phase
@@ -1633,6 +1639,10 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
                 updates["_decision"]["action"] = "use_tool"
             else:
                 logger.info(f"[{user_id}/{project_id}/{session_id}] No tool specified, looping back to think")
+                updates["messages"] = [HumanMessage(
+                    content=f"[system] You just transitioned to {to_phase} and are already there. "
+                            f"Do NOT request that transition again. Proceed with your workflow's next step."
+                )]
             return updates
 
         # AUTO-APPROVE: Downgrade to informational (safe, no approval needed)

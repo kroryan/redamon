@@ -992,8 +992,12 @@ class AgentOrchestrator:
                 logger.info(f"Transition ignored, executing tool: {tool_name}")
                 return "execute_tool"
             else:
-                logger.info("Transition ignored and no tool, generating response")
-                return "generate_response"
+                # A redundant/ignored transition (e.g. requesting the phase you are
+                # already in) must NOT end the run — loop back to think so the agent
+                # continues its workflow. Terminating here silently killed solvable
+                # runs that re-requested transition_phase after already transitioning.
+                logger.info("Transition ignored and no tool, looping back to think")
+                return "think"
         elif action == "plan_tools":
             if decision.get("tool_plan"):
                 return "execute_plan"
