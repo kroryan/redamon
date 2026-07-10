@@ -322,10 +322,14 @@ When starting a recon, the orchestrator:
 1. Removes any existing container with the same name
 2. Creates a new container with:
    - `network_mode: host` for scanning capabilities
-   - `NET_RAW` capability only (for `masscan`/`nmap` SYN scans); recon/partial
-     spawns run with `cap_drop: [ALL]` and NET_RAW re-added (STRIDE E6), plus the
-     D1 `pids_limit`/`nano_cpus` caps; the container is **not** privileged, so it
-     has no host-device or mount access
+   - `NET_RAW` capability only (for `masscan`/`nmap` SYN scans), plus the D1
+     `pids_limit`/`nano_cpus` caps; the container is **not** privileged, so it has
+     no host-device or mount access. (STRIDE E6 note: a `cap_drop: [ALL]` /
+     `no-new-privileges` reduction was attempted and reverted - both hard-break
+     the recon container, since it writes into the host-owned bind-mounted source
+     tree (needs `CAP_DAC_OVERRIDE`) and the image ships setuid tooling. Cap
+     reduction is a documented residual; the scoped `SCANNER_API_KEY` is the
+     effective E6 control.)
    - Filtering broker socket for nested (sibling) container execution, restricted
      to the known tool images. It is served on the `redamon_broker_socket` named
      volume (mounted at `/var/run/broker`) and selected via the `DOCKER_HOST`

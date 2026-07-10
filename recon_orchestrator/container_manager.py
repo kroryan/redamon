@@ -336,25 +336,23 @@ class ContainerManager:
         return {"INTERNAL_API_KEY": os.environ.get("INTERNAL_API_KEY", "")}
 
     def _scanner_hardening(self, drop_caps: bool = False) -> dict:
-        """S3/E6 conservative per-spawn privilege reduction (D1 pattern). Returns
-        kwargs to splat into containers.run().
+        """S3/E6 per-spawn privilege reduction (D1 pattern). Returns kwargs to
+        splat into containers.run(). Kept as the single hook for future cap
+        tightening; drop_caps is currently False at every call site.
 
-        Applied: cap_drop:[ALL] on recon / partial_recon only (drop_caps=True).
-        Those spawns ALREADY pass cap_add=["NET_RAW"] at the call site, so
-        cap_drop ALL leaves them with exactly NET_RAW (verified live: SYN scans
-        still work). We deliberately do NOT add cap_add here — that would
-        duplicate the existing cap_add kwarg. All other default caps were unused,
-        so this is behavior-preserving.
-
-        NOT applied (documented RESIDUAL):
-          - security_opt no-new-privileges: on this host's runtime it makes the
-            recon image unable to exec ANY binary ("operation not permitted",
-            even python) — the image ships setuid tooling (su/mount, ping+cap).
-            It would hard-break recon, so it is omitted (behavior-preservation).
-          - cap_drop on gvm/github-hunt/trufflehog/ai-surface: their capability
-            needs (e.g. GVM raw sockets) are not verifiable without running each
-            profile scanner, so they are left unchanged. The scoped
-            SCANNER_API_KEY (the primary S3/E6 win) still applies to every spawn."""
+        The privilege reduction is a documented RESIDUAL - the scoped
+        SCANNER_API_KEY (the primary S3/E6 win) is what closes the escalation and
+        it applies to every spawn. Two container-level hardenings were attempted
+        and reverted because they hard-break recon on this deployment:
+          - security_opt no-new-privileges: makes the recon image unable to exec
+            ANY binary ("operation not permitted", even python) on this runtime -
+            the image ships setuid tooling (su/mount, ping+cap).
+          - cap_drop:[ALL]: strips CAP_DAC_OVERRIDE, so root-in-container can no
+            longer write into the HOST-OWNED bind-mounted source tree (the recon
+            entrypoint mkdir's /app/recon/data/... and writes output there) -
+            container exits immediately with "Permission denied".
+        Re-enabling either requires re-adding the exact caps the entrypoint needs
+        (DAC_OVERRIDE/CHOWN/FOWNER/SETUID/SETGID/NET_RAW), verified per image."""
         kw: dict = {}
         if drop_caps:
             kw["cap_drop"] = ["ALL"]
@@ -549,7 +547,7 @@ class ContainerManager:
                 mem_limit=self._container_mem_limit("full_recon"),  # Memory governor (Part 4c)
                 pids_limit=self._container_pids_limit(),  # D1: fork-bomb ceiling
                 nano_cpus=self._container_cpu_limit(),  # D1: core-proportional CPU cap
-                **self._scanner_hardening(drop_caps=True),  # S3/E6: cap_drop ALL (NET_RAW kept via existing cap_add)
+                **self._scanner_hardening(drop_caps=False),  # S3/E6: cap_drop deferred (breaks writes to host-owned source bind mount; needs CAP_DAC_OVERRIDE)
                 command="python /app/recon/main.py",
             )
 
@@ -1284,7 +1282,7 @@ class ContainerManager:
                 mem_limit=self._container_mem_limit("partial_recon"),  # Memory governor (Part 4c)
                 pids_limit=self._container_pids_limit(),  # D1: fork-bomb ceiling
                 nano_cpus=self._container_cpu_limit(),  # D1: core-proportional CPU cap
-                **self._scanner_hardening(drop_caps=True),  # S3/E6: cap_drop ALL (NET_RAW kept via existing cap_add)
+                **self._scanner_hardening(drop_caps=False),  # S3/E6: cap_drop deferred (breaks writes to host-owned source bind mount; needs CAP_DAC_OVERRIDE)
                 command="python /app/recon/partial_recon.py",
             )
 
