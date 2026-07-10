@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, verifyActAsToken, AUTH_COOKIE_NAME, ACT_AS_COOKIE_NAME } from './auth'
+import { constantTimeEqual } from './constantTimeEqual'
 
 export interface Session {
   userId: string
@@ -83,7 +84,7 @@ export function isInternalRequest(request: NextRequest): boolean {
   const key = request.headers.get('x-internal-key')
   const expected = process.env.INTERNAL_API_KEY
   if (!key || !expected || expected === 'changeme') return false
-  return key === expected
+  return constantTimeEqual(key, expected)
 }
 
 /**
