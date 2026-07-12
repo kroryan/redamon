@@ -433,6 +433,10 @@ services:
       # "myregistry.local/naabu:latest,myregistry.local/httpx:latest"). Empty =
       # strict shipped-only. Forwarded to the recon pipeline by container_manager.
       RECON_EXTRA_ALLOWED_IMAGES: ${RECON_EXTRA_ALLOWED_IMAGES:-}
+      # D3: global + per-user concurrent-scan ceilings enforced at admission.
+      # SAFE, GENEROUS DEFAULTS so unset resolves to a real limit (never "no cap").
+      RECON_MAX_CONCURRENT_GLOBAL: ${RECON_MAX_CONCURRENT_GLOBAL:-20}
+      RECON_MAX_CONCURRENT_PER_USER: ${RECON_MAX_CONCURRENT_PER_USER:-10}
       # Forwarded to spawned recon containers (host network, so localhost)
       NEO4J_URI: bolt://localhost:7687
       NEO4J_USER: neo4j
