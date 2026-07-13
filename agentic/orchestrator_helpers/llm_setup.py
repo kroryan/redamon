@@ -176,6 +176,16 @@ def setup_llm(
                 temperature=custom_llm_config.get("temperature", 0),
                 max_tokens=custom_llm_config.get("maxTokens", 16384),
             )
+            if ptype == "openai_compatible":
+                # Consume OpenAI-compatible responses as SSE while preserving
+                # the existing ainvoke() contract. Long-running cloud-backed
+                # runtimes such as Ollama can otherwise leave a non-streaming
+                # request silent until the full completion is ready, causing
+                # an intermediary/read timeout even though generation is
+                # healthy. stream_usage keeps token accounting intact when
+                # ChatOpenAI aggregates the chunks into one AIMessage.
+                kwargs["streaming"] = True
+                kwargs["stream_usage"] = True
             base_url = custom_llm_config.get("baseUrl")
             ssl_verify = custom_llm_config.get("sslVerify", True)
             # SSRF guard (I15) + TLS-off-on-public guard (I16). Localhost/LAN
@@ -209,6 +219,8 @@ def setup_llm(
             api_key=openai_compat_api_key or "ollama",
             base_url=openai_compat_base_url,
             temperature=0,
+            streaming=True,
+            stream_usage=True,
         )
 
     elif provider == "openrouter":
