@@ -23,6 +23,13 @@ COPY . ./
 
 ARG REDAMON_VERSION=0.0.0
 ENV NEXT_PUBLIC_REDAMON_VERSION=$REDAMON_VERSION
+# Single-origin deploy: bake the same-origin agent WebSocket URL so the browser
+# never targets a public :8090. NEXT_PUBLIC_* is inlined by Next.js at build time,
+# so this MUST be set before `npm run build`. Empty by default => runtime auto-detect
+# (local dev falls back to ws://localhost:8090); the single-host deploy overlay sets
+# it to wss://<host>/ws/agent so the chat WebSocket works behind nginx.
+ARG NEXT_PUBLIC_AGENT_WS_URL=
+ENV NEXT_PUBLIC_AGENT_WS_URL=$NEXT_PUBLIC_AGENT_WS_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 # Dummy DATABASE_URL for Prisma client generation at build time (not used at runtime)

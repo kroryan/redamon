@@ -27,8 +27,9 @@ services:
     build:
       args:
         # Same-origin WS so the browser never targets :8090. NEXT_PUBLIC_* is inlined
-        # by Next.js at build time, so this is baked here (requires the Dockerfile ARG
-        # from webapp-dockerfile-ws-arg.patch + the cypherfix-ws-origin.patch).
+        # by Next.js at build time; the receiving `ARG NEXT_PUBLIC_AGENT_WS_URL` now
+        # lives in the base webapp/Dockerfile (no deploy-time patch), so every build
+        # bakes this correctly.
         NEXT_PUBLIC_AGENT_WS_URL: "${NEXT_PUBLIC_AGENT_WS_URL:-}"
         REDAMON_VERSION: "${REDAMON_VERSION:-0.0.0}"
     environment:

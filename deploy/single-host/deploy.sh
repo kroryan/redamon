@@ -272,7 +272,7 @@ build_deploy_env() {
 ship_assets() {
   hr "Ship deploy assets -> ${HOST_IP}:${REMOTE_TMP}"
   $SSH "rm -rf ${REMOTE_TMP} && mkdir -p ${REMOTE_TMP}"
-  $SCP -r "${SCRIPT_DIR}/modules" "${SCRIPT_DIR}/nginx" "${SCRIPT_DIR}/patches" "${SCRIPT_DIR}/compose" "${REMOTE_USER}@${HOST_IP}:${REMOTE_TMP}/"
+  $SCP -r "${SCRIPT_DIR}/modules" "${SCRIPT_DIR}/nginx" "${SCRIPT_DIR}/compose" "${REMOTE_USER}@${HOST_IP}:${REMOTE_TMP}/"
   # provided-TLS material
   if [[ "${TLS_MODE}" == "provided" ]]; then
     $SSH "mkdir -p ${REMOTE_TMP}/cert"
@@ -349,29 +349,17 @@ setup_fail2ban
 setup_unattended_upgrades
 EOF
 
-  hr "Clone repo + apply overlay/patches + seed app .env"
+  hr "Clone repo + install overlay + seed app .env"
   remote <<EOF
 ${PREAMBLE}
 step "Clone ${REPO_URL} (${REPO_BRANCH}) -> \$APP_PATH"
 git clone -b "\${REPO_BRANCH}" --depth 1 "\${REPO_URL}" "\$APP_PATH"
 cd "\$APP_PATH"
 # (the prod overlay is installed at \$OVERLAY_DIR by PREAMBLE, outside the repo tree)
-step "Apply deploy-time patches (sha256-verified, FATAL on failure -- T3)"
-# secure-cookie.patch and cypherfix-ws-origin.patch were DROPPED in wave 2: their
-# behavior is now in the base app (S12 decides Secure from x-forwarded-proto; S4
-# folded the same-origin WS URL into the hooks). Only webapp-dockerfile-ws-arg
-# remains. A sha256 mismatch (rotted/tampered patch) or a failed apply now ABORTS
-# the deploy instead of silently shipping a degraded build.
-apply_one() {
-  local p="\$1" expected="\$2"
-  local name; name="\$(basename "\$p")"
-  local actual; actual="\$(sha256sum "\$p" | awk '{print \$1}')"
-  [ "\$actual" = "\$expected" ] || { echo "✖ patch integrity check FAILED for \$name (expected \$expected, got \$actual)"; exit 1; }
-  if git apply --check "\$p" 2>/dev/null; then git apply "\$p" && success "applied \$name";
-  elif git apply --check --reverse "\$p" 2>/dev/null; then info "already applied: \$name";
-  else echo "✖ could not apply \$name cleanly (patch rotted against this tree) -- aborting deploy"; exit 1; fi
-}
-apply_one "${REMOTE_TMP}/patches/webapp-dockerfile-ws-arg.patch" "7d51ec90f3847c7257624ccc42058e69f344379d3122322a4c4aa59fa66b4378"
+# No deploy-time source patches: the single-origin agent WebSocket URL is now a
+# first-class build ARG in the base webapp/Dockerfile (NEXT_PUBLIC_AGENT_WS_URL),
+# baked from the prod overlay's build-arg. There is nothing to patch or reset, so a
+# rebuild can never silently ship the wrong (localhost:8090) WS URL.
 step "Seed application .env (operator app-config only; secrets are redamon.sh's job)"
 touch .env
 seed() { local k="\$1" v="\$2"; [ -z "\$v" ] && return 0; grep -q "^\$k=" .env && sed -i "s|^\$k=.*|\$k=\$v|" .env || echo "\$k=\$v" >> .env; }
@@ -609,7 +597,7 @@ EOF
 cmd_update() {
   hr "UPDATE ${HOST_IP} (pull latest ${REPO_BRANCH} HEAD + apply)"
   ship_assets
-  hr "Reset patched files, pull --ff-only, re-apply patches, run redamon.sh update"
+  hr "Pull --ff-only + diff-driven rebuild via redamon.sh update"
   remote <<EOF
 ${PREAMBLE}
 cd "\$APP_PATH"
@@ -618,34 +606,15 @@ export DOMAIN NEXT_PUBLIC_AGENT_WS_URL AGENT_CORS_ORIGINS WEBAPP_NODE_ENV
 [ -n "\${REDAMON_VERSION}" ] && export REDAMON_VERSION
 is_true "\${ENABLE_ZRAM}" && export REDAMON_ENABLE_ZRAM=1
 [ -n "\${REDAMON_BUILD_PARALLEL}" ] && export REDAMON_BUILD_PARALLEL
-# (prod overlay is at \$OVERLAY_DIR, outside the tree, so it never blocks git pull --ff-only)
-step "Restore patched files so the tree is fast-forwardable"
-# Only webapp/Dockerfile is still deploy-patched (T3): the cypherfix hooks and
-# the login route are now hardened in the base app, so they are no longer reset.
-for f in webapp/Dockerfile; do
-  git checkout -- "\$f" 2>/dev/null || true
-done
+# No source patches to reset: webapp's single-origin WS URL is a first-class ARG in the
+# base Dockerfile (NEXT_PUBLIC_AGENT_WS_URL), baked from the prod overlay's build-arg, so
+# redamon.sh's own diff-driven webapp rebuild bakes it correctly. The old reset -> pull ->
+# re-apply-patch -> rebuild dance is gone -- it could leave the Dockerfile unpatched and
+# ship the wrong ws://localhost:8090 WS URL (the chat "Connecting..." bug).
+# Preserve the version stamp so the overlay build-arg doesn't default to 0.0.0.
+[ -z "\${REDAMON_VERSION:-}" ] && [ -f VERSION ] && export REDAMON_VERSION="\$(cat VERSION 2>/dev/null || echo)"
 step "redamon.sh update (git pull --ff-only + diff-driven rebuild + secret regen)"
 sg docker -c "cd \$APP_PATH && ./redamon.sh update"
-step "Re-apply deploy-time patch on the new HEAD (sha256-verified, FATAL -- T3)"
-apply_one() {
-  local p="\$1" expected="\$2"
-  local name; name="\$(basename "\$p")"
-  local actual; actual="\$(sha256sum "\$p" | awk '{print \$1}')"
-  [ "\$actual" = "\$expected" ] || { echo "✖ patch integrity check FAILED for \$name (expected \$expected, got \$actual)"; exit 1; }
-  if git apply --check "\$p" 2>/dev/null; then git apply "\$p" && success "applied \$name";
-  elif git apply --check --reverse "\$p" 2>/dev/null; then info "already applied: \$name";
-  else echo "✖ could not apply \$name cleanly (patch rotted against this tree) -- aborting deploy"; exit 1; fi
-}
-apply_one "${REMOTE_TMP}/patches/webapp-dockerfile-ws-arg.patch" "7d51ec90f3847c7257624ccc42058e69f344379d3122322a4c4aa59fa66b4378"
-# CRITICAL: 'redamon.sh update' rebuilt webapp from the RESET (unpatched) tree, so the
-# baked NEXT_PUBLIC_AGENT_WS_URL / cypherfix / Secure-cookie changes are missing. Rebuild
-# webapp now, from the re-patched tree, so the single-origin hardening survives the update.
-step "Rebuild webapp with re-applied patches baked in (single-origin WS + Secure cookie)"
-# Preserve the version stamp redamon.sh baked (else the overlay build-arg defaults to 0.0.0)
-[ -z "\${REDAMON_VERSION:-}" ] && [ -f VERSION ] && export REDAMON_VERSION="\$(cat VERSION 2>/dev/null || echo)"
-sg docker -c "cd \$APP_PATH && docker compose build webapp && docker compose up -d --no-deps --force-recreate webapp"
-success "webapp rebuilt with patches"
 EOF
   run_secrets_gate
   # nginx may have changed; re-render is idempotent + gated

@@ -297,7 +297,7 @@ its session gate. The browser reaches the agent's WebSockets at `wss://<domain>/
    `LETSENCRYPT_EMAIL`, and `ADMIN_NAME`/`ADMIN_EMAIL`/`ADMIN_PASSWORD`. Point `DOMAIN`'s
    A-record at `HOST_IP` first (letsencrypt needs it).
 2. `./deploy.sh init` -> type `INIT` to confirm the wipe.
-3. Watch: teardown -> host bootstrap -> hardening -> clone + patches -> `redamon.sh install`
+3. Watch: teardown -> host bootstrap -> hardening -> clone + overlay -> `redamon.sh install`
    (30-60 min build) -> secrets gate -> admin bootstrap -> nginx + TLS -> verify.
 4. Verification asserts loopback binds (3000/8090 on 127.0.0.1 only), datastores never
    off-loopback, container health, an admin exists, and `https://<domain>/api/health` -> 200.
@@ -316,20 +316,19 @@ hosts, optional Docker DNS, and inotify limits. Nothing is assumed pre-present.
 
 ## Update and rollback
 
-`update` is a thin wrapper around `redamon.sh update`: it restores the deploy-time patched
-files so the tree is fast-forwardable, runs `git pull --ff-only` + diff-driven selective
-rebuild + secret regen (all via redamon.sh, which preserves DB passwords by volume detection),
-then re-applies the patches AND rebuilds the webapp image so the baked single-origin WS URL
-and Secure-cookie change survive the update (redamon.sh would otherwise rebuild webapp from
-the reset, unpatched tree). Finally it re-renders nginx. **All engagement data (Postgres,
-Neo4j, reports, GVM feeds, models) lives in named volumes that survive `update`.**
+`update` is a thin wrapper around `redamon.sh update`: `git pull --ff-only` + diff-driven
+selective rebuild + secret regen (all via redamon.sh, which preserves DB passwords by volume
+detection), then re-renders nginx. No source patches are applied: the single-origin agent WS
+URL is a first-class `ARG NEXT_PUBLIC_AGENT_WS_URL` in the base `webapp/Dockerfile`, baked from
+the prod overlay's build-arg, so redamon.sh's own webapp rebuild bakes the right value.
+**All engagement data (Postgres, Neo4j, reports, GVM feeds, models) lives in named volumes
+that survive `update`.**
 
-The deploy applies three app-code changes on the host checkout at deploy time (they are not
-committed to the app source): the `webapp/Dockerfile` `NEXT_PUBLIC_AGENT_WS_URL` build arg,
-the cypherfix WS-origin fix, and the Secure-cookie flip (https only). They live in `patches/`.
-The prod compose overlay and these patches are SCP'd to the host and copied into the checkout
-by `deploy.sh`, so the deploy works even if `deploy/single-host/` is not committed to the
-cloned branch (committing it is still fine and makes the overlay part of the repo history).
+The prod compose overlay (`compose/docker-compose.prod.yml`) is SCP'd to the host and installed
+at `$HOME/.redamon-deploy` (outside the checkout, so it never blocks `git pull --ff-only`). It
+sets `NEXT_PUBLIC_AGENT_WS_URL=wss://<host>/ws/agent` as the webapp build-arg. The deploy works
+even if `deploy/single-host/` is not committed to the cloned branch (committing it is still fine
+and makes the overlay part of the repo history).
 
 Rollback is manual: `git reset --hard <prev>` on the host checkout, then `./deploy.sh update`.
 
