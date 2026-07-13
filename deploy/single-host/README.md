@@ -123,6 +123,7 @@ flag it manages. Control KB with `ENABLE_KB` only.
 | `REDAMON_SKIP_RAM_GATE` | `true` bypasses the 8 GB floor on tiny boxes (risky). |
 | `REDAMON_BUILD_PARALLEL` | Cap concurrent image builds. Blank -> redamon.sh auto-sizes. |
 | `DOCKER_DNS` | e.g. `8.8.8.8,8.8.4.4` merged into `/etc/docker/daemon.json` if container DNS breaks. |
+| `DOCKER_BUILD_CACHE_MAX_GB` | Cap the BuildKit build cache (GB) via `daemon.json` auto-GC. Blank -> Docker's default. `update` reuses but never prunes the cache, so it grows unbounded; set e.g. `30` to bound it without slowing incremental rebuilds. |
 
 ### Engagement knobs
 | Key | Purpose |
@@ -357,6 +358,7 @@ application `.env`.
 | `ENABLE_KB` | `install --kbase` |
 | `ENABLE_ZRAM` | `REDAMON_ENABLE_ZRAM=1` |
 | `REDAMON_BUILD_PARALLEL` | `REDAMON_BUILD_PARALLEL` (blank -> auto) |
+| `DOCKER_BUILD_CACHE_MAX_GB` | `builder.gc.defaultKeepStorage` in `/etc/docker/daemon.json` (blank -> Docker default) |
 | `REDAMON_SKIP_RAM_GATE` | `REDAMON_SKIP_RAM_GATE=1` |
 | `REDAMON_VERSION` | image build-arg stamp |
 | (fixed) | `COMPOSE_FILE` = base + prod overlay, made sticky |

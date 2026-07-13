@@ -185,7 +185,32 @@ bootstrap_docker_dns() {
   success "Docker DNS set to ${dns}"
 }
 
-# --- 12. inotify limits (small-host safety for 15+ containers) ---
+# --- 12. BuildKit cache cap (bound build-cache disk growth across updates) ---
+# redamon.sh `update` reuses the build cache for fast incremental rebuilds but
+# never prunes it, so it grows unbounded over many updates. Setting
+# DOCKER_BUILD_CACHE_MAX_GB makes the daemon auto-GC the cache to that ceiling,
+# so it can never eat operational headroom. Blank -> leave Docker's default.
+bootstrap_docker_build_cache() {
+  local gb="${DOCKER_BUILD_CACHE_MAX_GB:-}"
+  [[ -z "${gb}" ]] && return 0
+  gb="${gb//[^0-9]/}"                     # digits only
+  [[ -z "${gb}" || "${gb}" -eq 0 ]] && return 0
+  step "Host bootstrap: BuildKit cache cap (${gb}GB)"
+  local current="{}"
+  [[ -f /etc/docker/daemon.json ]] && current=$(run_sudo cat /etc/docker/daemon.json 2>/dev/null || echo '{}')
+  if [[ "$(printf '%s' "${current}" | jq -r '.builder.gc.defaultKeepStorage // empty' 2>/dev/null)" == "${gb}GB" ]]; then
+    info "daemon.json already caps build cache at ${gb}GB -- leaving as-is"
+    return 0
+  fi
+  run_sudo mkdir -p /etc/docker
+  printf '%s' "${current}" \
+    | jq --arg ks "${gb}GB" '.builder.gc.enabled = true | .builder.gc.defaultKeepStorage = $ks' \
+    | run_sudo_tee /etc/docker/daemon.json
+  run_sudo systemctl restart docker
+  success "BuildKit cache capped at ${gb}GB (daemon auto-GC)"
+}
+
+# --- 13. inotify limits (small-host safety for 15+ containers) ---
 bootstrap_inotify_limits() {
   local want_instances=1024 want_watches=524288
   local cur_i cur_w
@@ -213,6 +238,7 @@ host_bootstrap() {
   bootstrap_unattended_upgrades
   bootstrap_swap
   bootstrap_docker_dns
+  bootstrap_docker_build_cache
   bootstrap_inotify_limits
   success "Host bootstrap complete"
 }
