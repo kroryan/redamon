@@ -32,13 +32,18 @@ run_sudo() {
   fi
 }
 
-# sudo tee helper for writing root-owned files from a heredoc/pipe (stdin = the data)
+# sudo tee helper for writing root-owned files from a heredoc/pipe (stdin = the data).
+# Accepts an optional leading -a (append) flag: `run_sudo_tee -a /path`. Without this,
+# callers passing `-a` had it swallowed as the path, so `tee -a` (no file) wrote the data
+# to /dev/null -- silently dropping sshd_config directives and the swap fstab line.
 run_sudo_tee() {
+  local append=""
+  [[ "$1" == "-a" ]] && { append="-a"; shift; }
   local path="$1"
   if [[ -n "${SUDO_PASSWORD:-}" ]]; then
-    _setup_askpass; SUDO_ASKPASS="${_ASKPASS}" sudo -A tee "$path" >/dev/null
+    _setup_askpass; SUDO_ASKPASS="${_ASKPASS}" sudo -A tee ${append} "$path" >/dev/null
   else
-    sudo tee "$path" >/dev/null
+    sudo tee ${append} "$path" >/dev/null
   fi
 }
 

@@ -51,6 +51,12 @@ _install_htpasswd() {
   local hash
   hash=$(openssl passwd -apr1 "${BASIC_AUTH_PASS}")
   printf '%s:%s\n' "${BASIC_AUTH_USER}" "${hash}" | run_sudo_tee /etc/nginx/.redamon_htpasswd
+  # Must be readable by the nginx worker (www-data on Debian/Ubuntu). 640 root:root left
+  # www-data unable to open() it -> every credentialed request 500'd. Own it by the nginx
+  # group so basic_auth actually authenticates.
+  local ngx_grp; ngx_grp="$(id -gn "$(ps -o user= -C nginx 2>/dev/null | grep -v '^root$' | head -1)" 2>/dev/null)"
+  [[ -n "${ngx_grp}" ]] || ngx_grp=www-data
+  run_sudo chown "root:${ngx_grp}" /etc/nginx/.redamon_htpasswd
   run_sudo chmod 640 /etc/nginx/.redamon_htpasswd
 }
 
