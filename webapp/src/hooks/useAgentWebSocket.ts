@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react'
+import { buildAgentWsUrl } from './agentWsUrl'
 import {
   MessageType,
   ConnectionStatus,
@@ -82,22 +83,9 @@ export function useAgentWebSocket({
   const isAuthenticatedRef = useRef(false)
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Get WebSocket URL - auto-detect from browser location so it works on any machine
-  const getWebSocketUrl = useCallback(() => {
-    // 1. Explicit build-time env var (if set during next build)
-    if (process.env.NEXT_PUBLIC_AGENT_WS_URL) {
-      return process.env.NEXT_PUBLIC_AGENT_WS_URL
-    }
-    // 2. Auto-detect from current browser location
-    // Agent runs on the same host as the webapp, mapped to port 8090
-    if (typeof window !== 'undefined') {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = window.location.hostname
-      return `${protocol}//${host}:8090/ws/agent`
-    }
-    // 3. Fallback for SSR
-    return 'ws://localhost:8090/ws/agent'
-  }, [])
+  // Get WebSocket URL - auto-detect from browser location so it works on any
+  // machine. The chat socket authenticates via the init frame (not a URL ticket).
+  const getWebSocketUrl = useCallback(() => buildAgentWsUrl('/ws/agent'), [])
 
   // Send a message to the server
   const sendMessage = useCallback(<T = any>(type: MessageType, payload: T) => {

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback, memo } from 'react'
 import { Terminal as TerminalIcon, Wifi, WifiOff, RefreshCw, Maximize2, Minimize2 } from 'lucide-react'
 import type { Terminal } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
+import { buildAgentWsUrl } from '@/hooks/agentWsUrl'
 import styles from './KaliTerminal.module.css'
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -12,23 +13,10 @@ const MAX_RECONNECT_ATTEMPTS = 5
 const BASE_RECONNECT_INTERVAL = 2000
 const PING_INTERVAL_MS = 30000
 
+// STRIDE S3: the agent proxy requires a ws-ticket to open the PTY; buildAgentWsUrl
+// appends it as a query param so the raw byte bridge is unchanged.
 function getWsUrl(ticket?: string): string {
-  let base: string
-  if (process.env.NEXT_PUBLIC_AGENT_WS_URL) {
-    base = process.env.NEXT_PUBLIC_AGENT_WS_URL.replace(/\/ws\/agent$/, '/ws/kali-terminal')
-  } else if (typeof window !== 'undefined') {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.hostname
-    base = `${protocol}//${host}:8090/ws/kali-terminal`
-  } else {
-    base = 'ws://localhost:8090/ws/kali-terminal'
-  }
-  // STRIDE S3: the agent proxy requires a ws-ticket to open the PTY. Pass it as
-  // a query param so the raw byte bridge is unchanged.
-  if (ticket) {
-    base += (base.includes('?') ? '&' : '?') + 'ticket=' + encodeURIComponent(ticket)
-  }
-  return base
+  return buildAgentWsUrl('/ws/kali-terminal', ticket)
 }
 
 // STRIDE S3: mint a ws-ticket bound to the effective user + project before

@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react'
+import { buildAgentWsUrl } from './agentWsUrl'
 import {
   CypherFixTriageMessageType,
   type TriagePhase,
@@ -77,24 +78,12 @@ export function useCypherFixTriageWS({
   // would null the live socket's ref and kill its keepalive.
   const connectingRef = useRef(false)
 
-  const getWebSocketUrl = useCallback((ticket?: string) => {
-    let base: string
-    // Same-origin single-origin deploy: reuse the agent WS origin and swap the
-    // path (folds the former deploy-time cypherfix-ws-origin.patch into the base
-    // hook so this hook never targets a public :8090).
-    if (process.env.NEXT_PUBLIC_AGENT_WS_URL) {
-      base = process.env.NEXT_PUBLIC_AGENT_WS_URL.replace(/\/ws\/agent$/, '/ws/cypherfix-triage')
-    } else if (typeof window !== 'undefined') {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = window.location.hostname
-      base = `${protocol}//${host}:8090/ws/cypherfix-triage`
-    } else {
-      base = 'ws://localhost:8090/ws/cypherfix-triage'
-    }
-    // STRIDE S4: the agent handler requires a ws-ticket (query param).
-    if (ticket) base += (base.includes('?') ? '&' : '?') + 'ticket=' + encodeURIComponent(ticket)
-    return base
-  }, [])
+  // STRIDE S4: the agent handler requires a ws-ticket (query param); buildAgentWsUrl
+  // appends it. Single-origin deploys reuse the agent WS origin and swap the path.
+  const getWebSocketUrl = useCallback(
+    (ticket?: string) => buildAgentWsUrl('/ws/cypherfix-triage', ticket),
+    [],
+  )
 
   const sendMessage = useCallback((type: string, payload: Record<string, unknown> = {}) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return

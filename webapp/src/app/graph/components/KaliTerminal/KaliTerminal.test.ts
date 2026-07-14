@@ -1,36 +1,29 @@
-import { describe, test, expect } from 'vitest'
+import { describe, test, expect, afterEach, vi } from 'vitest'
+import { buildAgentWsUrl } from '@/hooks/agentWsUrl'
 
+// KaliTerminal's getWsUrl delegates to buildAgentWsUrl('/ws/kali-terminal', ...).
+// Test that real path here; the exhaustive matrix lives in hooks/agentWsUrl.test.ts.
 describe('KaliTerminal WebSocket URL', () => {
-  test('generates correct WebSocket URL format', () => {
-    const protocol = 'ws:'
-    const host = 'localhost'
-    const url = `${protocol}//${host}:8090/ws/kali-terminal`
-    expect(url).toBe('ws://localhost:8090/ws/kali-terminal')
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    delete process.env.NEXT_PUBLIC_AGENT_WS_URL
   })
 
-  test('uses wss for https', () => {
-    const protocol = 'wss:'
-    const host = 'example.com'
-    const url = `${protocol}//${host}:8090/ws/kali-terminal`
-    expect(url).toBe('wss://example.com:8090/ws/kali-terminal')
+  test('local dev keeps the agent on :8090', () => {
+    vi.stubGlobal('window', { location: { protocol: 'http:', hostname: 'localhost', port: '3000' } })
+    expect(buildAgentWsUrl('/ws/kali-terminal')).toBe('ws://localhost:8090/ws/kali-terminal')
   })
 
-  test('URL contains correct path', () => {
-    const url = 'ws://localhost:8090/ws/kali-terminal'
-    expect(url).toContain('/ws/kali-terminal')
-    expect(url).toContain(':8090')
+  test('proxied https host uses same origin (no :8090)', () => {
+    vi.stubGlobal('window', { location: { protocol: 'https:', hostname: 'example.com', port: '' } })
+    const url = buildAgentWsUrl('/ws/kali-terminal')
+    expect(url).toBe('wss://example.com/ws/kali-terminal')
+    expect(url).not.toContain(':8090')
   })
 
-  test('derives kali-terminal URL from agent WS URL', () => {
-    const agentUrl = 'ws://myhost:8090/ws/agent'
-    const terminalUrl = agentUrl.replace(/\/ws\/agent$/, '/ws/kali-terminal')
-    expect(terminalUrl).toBe('ws://myhost:8090/ws/kali-terminal')
-  })
-
-  test('derives wss kali-terminal URL from agent WS URL', () => {
-    const agentUrl = 'wss://secure.example.com:8090/ws/agent'
-    const terminalUrl = agentUrl.replace(/\/ws\/agent$/, '/ws/kali-terminal')
-    expect(terminalUrl).toBe('wss://secure.example.com:8090/ws/kali-terminal')
+  test('derives kali-terminal URL from the baked agent WS URL', () => {
+    process.env.NEXT_PUBLIC_AGENT_WS_URL = 'wss://secure.example.com/ws/agent'
+    expect(buildAgentWsUrl('/ws/kali-terminal')).toBe('wss://secure.example.com/ws/kali-terminal')
   })
 })
 

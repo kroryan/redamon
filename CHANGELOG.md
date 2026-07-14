@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.1] - 2026-07-14
+
+### Fixed
+
+- **Browser -> agent WebSocket fallback no longer hardcodes a public `:8090`.** When `NEXT_PUBLIC_AGENT_WS_URL` is not baked into the webapp build, the four WS hooks (chat `/ws/agent`, Kali terminal, both cypherfix sockets) previously fell back to `ws://<host>:8090/ws/...`, which bypasses the nginx single-origin funnel and, in a hardened deploy where the agent port is loopback-bound, is unreachable from the browser (Kali Terminal stuck on "Connecting to kali-sandbox..." forever). The fallback now reuses the current page origin (`host[:port]`) for any non-localhost host, so traffic flows through whatever reverse proxy serves the page; `localhost`/`127.0.0.1` still target the agent on `:8090` for local dev. This is defense-in-depth behind the [6.0.0] build fix that bakes `NEXT_PUBLIC_AGENT_WS_URL` from the deploy overlay.
+- The four hooks now share a single tested helper, [webapp/src/hooks/agentWsUrl.ts](webapp/src/hooks/agentWsUrl.ts) (`buildAgentWsUrl`), replacing four copies of the URL logic. Covered by a regression suite ([webapp/src/hooks/agentWsUrl.test.ts](webapp/src/hooks/agentWsUrl.test.ts)) that asserts no WS path ever emits `:8090` on a proxied host.
+
+---
+
 ## [6.0.0] - 2026-07-12
 
 ### Security
