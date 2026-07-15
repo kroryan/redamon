@@ -46,4 +46,48 @@ def extract_json(response_text: str) -> Optional[str]:
 
     if json_start >= 0 and json_end > json_start:
         return response_text[json_start:json_end]
+    if json_start >= 0:
+        # Preserve an unterminated object so the conservative trailing-delimiter
+        # repair can inspect it.  Strip a closing Markdown fence, which is not
+        # part of the model's JSON payload.
+        return response_text[json_start:].removesuffix("```").rstrip()
     return None
+
+
+def repair_trailing_json_delimiters(json_text: str) -> Optional[str]:
+    """Close only unambiguous trailing JSON objects/arrays.
+
+    Local reasoning models occasionally emit a complete decision but omit one
+    or more final ``}``/``]`` characters.  This scanner deliberately does not
+    attempt general JSON repair: it refuses mismatched delimiters and
+    unterminated strings, and it never inserts commas or changes field values.
+    """
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    matching_open = {"}": "{", "]": "["}
+    closing = {"{": "}", "[": "]"}
+
+    for char in json_text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char in closing:
+            stack.append(char)
+        elif char in matching_open:
+            if not stack or stack[-1] != matching_open[char]:
+                return None
+            stack.pop()
+
+    if in_string or not stack:
+        return None
+
+    return json_text + "".join(closing[opener] for opener in reversed(stack))
