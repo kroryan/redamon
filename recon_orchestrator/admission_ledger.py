@@ -28,7 +28,7 @@ _FALLBACK_OS_HEADROOM = 2 * 1024 ** 3
 
 # D3: generous per-user concurrent-scan default when RECON_MAX_CONCURRENT_PER_USER
 # is unset. Fails SAFE to a real number, never to "no cap".
-_FALLBACK_PER_USER_CAP = 10
+_FALLBACK_PER_USER_CAP = 30
 
 
 class AdmissionError(ValueError):

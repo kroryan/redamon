@@ -4,6 +4,7 @@ import prisma from '@/lib/prisma'
 import { existsSync } from 'fs'
 import path from 'path'
 import { orchestratorFetch } from '@/lib/orchestrator'
+import { normalizeOrchestratorStartError } from '@/lib/orchestratorError'
 
 const RECON_ORCHESTRATOR_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://localhost:8010'
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000'
@@ -72,8 +73,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
+      // Governor rejections carry a structured object detail; normalize to a
+      // string message (+ limit) so it is never rendered as a raw React child.
+      const { error, limit } = normalizeOrchestratorStartError(errorData, 'Failed to start TruffleHog scan')
       return NextResponse.json(
-        { error: errorData.detail || 'Failed to start TruffleHog scan' },
+        { error, ...(limit ? { limit } : {}) },
         { status: response.status }
       )
     }
