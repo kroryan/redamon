@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.2] - 2026-07-15
+
+### Fixed
+
+- **Orchestrator no longer freezes during parallel/long scans.** Synchronous Docker calls on the single event loop (status polls, scan spawns, and a per-log-line `container.reload()`) are moved onto dedicated thread pools and the liveness check is throttled, so health checks, status polls, and new scan starts stay responsive even during a GraphQL scan plus many parallel partial recons. Covers recon, partial recon, GVM, GitHub-hunt, and TruffleHog.
+- **Client-side crash after starting a scan.** The memory governor's structured rejection payload was forwarded as an object and rendered as a React child ("Objects are not valid as a React child"), taking the whole page down. All scan start routes now normalize it to a string via a shared helper, and a new root `global-error.tsx` boundary catches any other render error instead of white-screening.
+- **False "not enough RAM" scan rejections.** Every scan reserved a flat 4 GB envelope (~26x the measured ~150 MB peak), so a few parallel partial recons exhausted the reserved budget while 10+ GB was still free. Envelopes right-sized: partial recon 512 MB, full recon 1.5 GB.
+- **Webapp requests to a hung orchestrator no longer hang.** `orchestratorFetch` now applies a default timeout (SSE log streams exempt), so a stalled backend surfaces a clean error instead of a 60s hang.
+
+### Changed
+
+- Default concurrent-scan ceilings raised from 10/20 to 30/30 (`RECON_MAX_CONCURRENT_PER_USER`, `RECON_MAX_CONCURRENT_GLOBAL`).
+
+---
+
 ## [6.0.1] - 2026-07-14
 
 ### Fixed

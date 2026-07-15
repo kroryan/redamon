@@ -2,7 +2,10 @@
 Docker container lifecycle management for recon processes
 """
 import asyncio
+import functools
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 import os
 import re
 import uuid
@@ -159,6 +162,21 @@ class ContainerManager:
         # (Step 1). The AI attack lifecycle ref-counts a judge lease through it.
         self.local_llm_manager = None
         self._log_tasks: dict[str, asyncio.Task] = {}
+
+        # Two DEDICATED thread pools, deliberately NOT the default executor.
+        #
+        # docker-py is synchronous; the async paths offload it to threads so the
+        # event loop never blocks. But a log-stream reader thread blocks on
+        # container.logs(follow=True) for the WHOLE scan (hours), so each active
+        # SSE stream permanently holds one worker. If short status/spawn Docker
+        # calls shared that pool, enough concurrent streams would exhaust it and
+        # status polls / new scan starts would queue forever -- the same freeze,
+        # via pool exhaustion instead of event-loop blocking. Isolating them means
+        # request-servicing Docker ops can never be starved by streaming threads.
+        self._docker_op_executor = ThreadPoolExecutor(
+            max_workers=16, thread_name_prefix="docker-op")      # short status/spawn calls
+        self._log_stream_executor = ThreadPoolExecutor(
+            max_workers=64, thread_name_prefix="log-stream")     # long-lived follow=True readers
 
         # CodeFix build sandboxes (T6/E10): ephemeral, hardened, secret-free
         # containers that run the UNTRUSTED clone+build+test step of the CypherFix
@@ -376,8 +394,31 @@ class ContainerManager:
         safe_id = re.sub(r'[^a-zA-Z0-9_.-]', '_', project_id)
         return f"redamon-recon-{safe_id}"
 
+    async def _run_blocking(self, fn, *args):
+        """Run a blocking (docker-py) callable in the default thread pool so it
+        never stalls the single asyncio event loop.
+
+        docker-py is synchronous: a direct call inside an `async def` blocks the
+        ONE uvicorn worker's event loop until the Docker daemon answers, so every
+        other in-flight request (health checks, status polls, new scan starts)
+        stalls with it. Under a busy daemon (many parallel scans + heavy log
+        streaming) that starves the loop and freezes the whole orchestrator. All
+        synchronous Docker I/O on the async paths must go through here."""
+        loop = asyncio.get_running_loop()
+        # Dedicated pool (NOT the default): never shares workers with the
+        # long-lived log-stream readers, so status/spawn calls can't be starved.
+        return await loop.run_in_executor(self._docker_op_executor, fn, *args)
+
     async def get_status(self, project_id: str) -> ReconState:
-        """Get current status of a recon process"""
+        """Get current status of a recon process.
+
+        The Docker inspection runs off the event loop via _run_blocking so a slow
+        Docker daemon can't stall the single worker and freeze every request."""
+        return await self._run_blocking(self._get_status_sync, project_id)
+
+    def _get_status_sync(self, project_id: str) -> ReconState:
+        """Synchronous Docker inspection body of get_status(). Call ONLY via
+        _run_blocking so it never executes directly on the event loop."""
         if project_id in self.running_states:
             state = self.running_states[project_id]
 
@@ -946,18 +987,30 @@ class ContainerManager:
             def read_logs():
                 """Synchronous function to read logs and put them in the queue"""
                 try:
+                    # Throttle the per-line liveness reload() below: next allowed
+                    # Docker status poll, in monotonic seconds (list = mutable box).
+                    _log_status_gate = [time.monotonic() + 30.0]
                     for line in container.logs(stream=True, follow=True, timestamps=True):
                         asyncio.run_coroutine_threadsafe(
                             log_queue.put(line),
                             loop
                         ).result(timeout=5)
                         # Check if container is still running
-                        try:
-                            container.reload()
-                            if container.status not in ("running", "paused"):
+                        # Liveness check, THROTTLED to once per ~30s. Previously
+                        # reload() ran on EVERY log line -- a Docker round-trip per
+                        # line. A scan emitting 100k+ lines flooded the daemon,
+                        # slowing every request and starving the event loop (the
+                        # parallel-scan freeze). The stream generator ending already
+                        # stops the loop when a container exits, so a 30s liveness
+                        # poll loses nothing but the wasted daemon load.
+                        if time.monotonic() >= _log_status_gate[0]:
+                            _log_status_gate[0] = time.monotonic() + 30.0
+                            try:
+                                container.reload()
+                                if container.status not in ("running", "paused"):
+                                    break
+                            except Exception:
                                 break
-                        except Exception:
-                            break
                 except Exception as e:
                     logger.error(f"Error in log reader thread: {e}")
                 finally:
@@ -971,7 +1024,7 @@ class ContainerManager:
                         pass
 
             # Start log reader in a thread
-            loop.run_in_executor(None, read_logs)
+            loop.run_in_executor(self._log_stream_executor, read_logs)
 
             # Process logs from queue
             while True:
@@ -1138,7 +1191,7 @@ class ContainerManager:
         runs = self.partial_recon_states.get(project_id, {})
         state = runs.get(run_id)
         if state:
-            self._refresh_partial_recon_state(state)
+            await self._run_blocking(self._refresh_partial_recon_state, state)
             return state
 
         return PartialReconState(
@@ -1154,17 +1207,28 @@ class ContainerManager:
         runs = self.partial_recon_states.get(project_id, {})
         to_remove = []
 
+        # Refresh every run's Docker status CONCURRENTLY in the thread pool. Done
+        # serially on the event loop, N parallel scans meant N blocking docker-py
+        # calls back-to-back every poll (~every 5s) -- the core of the freeze that
+        # blocked new scan starts once several partial recons were running.
+        await asyncio.gather(*[
+            self._run_blocking(self._refresh_partial_recon_state, state)
+            for state in runs.values()
+        ])
+
         for run_id, state in runs.items():
-            self._refresh_partial_recon_state(state)
             # Auto-clean old completed/errored entries
             if state.status in (PartialReconStatus.COMPLETED, PartialReconStatus.ERROR):
                 if state.completed_at and (datetime.now(timezone.utc) - state.completed_at).total_seconds() > 60:
                     to_remove.append(run_id)
 
+        # pop(), not del: the gather above is an await point, so a concurrent
+        # get_all (an HTTP poll racing the background reconcile) can clean the
+        # same run first. del would then KeyError -> 500; pop is idempotent.
         for run_id in to_remove:
-            del runs[run_id]
-        if not runs and project_id in self.partial_recon_states:
-            del self.partial_recon_states[project_id]
+            runs.pop(run_id, None)
+        if not runs:
+            self.partial_recon_states.pop(project_id, None)
 
         return list(runs.values())
 
@@ -1214,12 +1278,16 @@ class ContainerManager:
         self.partial_recon_states.setdefault(project_id, {})[run_id] = state
 
         try:
-            # Ensure recon image exists
-            try:
-                self.client.images.get(self.recon_image)
-            except NotFound:
-                logger.info(f"Building recon image from {recon_path}")
-                self.client.images.build(path=recon_path, tag=self.recon_image, rm=True)
+            # Ensure recon image exists. images.build (cold-image case) is a
+            # long blocking docker-py call -- run it off the event loop so a build
+            # can't stall every other request while this POST is in flight.
+            def _ensure_image():
+                try:
+                    self.client.images.get(self.recon_image)
+                except NotFound:
+                    logger.info(f"Building recon image from {recon_path}")
+                    self.client.images.build(path=recon_path, tag=self.recon_image, rm=True)
+            await self._run_blocking(_ensure_image)
 
             # Write config JSON to /tmp/redamon/ (shared volume)
             import json
@@ -1229,8 +1297,11 @@ class ContainerManager:
             with open(config_path, "w") as f:
                 json.dump(config, f)
 
-            # Start container with the partial_recon.py entry point
-            container = self.client.containers.run(
+            # Start container with the partial_recon.py entry point. containers.run
+            # is blocking; run it in the thread pool so the spawn never stalls the
+            # single event loop (this is the POST the freeze bug reported hanging).
+            container = await self._run_blocking(functools.partial(
+                self.client.containers.run,
                 self.recon_image,
                 name=container_name,
                 detach=True,
@@ -1286,7 +1357,7 @@ class ContainerManager:
                 nano_cpus=self._container_cpu_limit(),  # D1: core-proportional CPU cap
                 **self._scanner_hardening(drop_caps=False),  # S3/E6: cap_drop deferred (breaks writes to host-owned source bind mount; needs CAP_DAC_OVERRIDE)
                 command="python /app/recon/partial_recon.py",
-            )
+            ))
 
             state.container_id = container.id
             state.status = PartialReconStatus.RUNNING
@@ -1379,16 +1450,26 @@ class ContainerManager:
                     log_stream_kwargs = {"stream": True, "follow": True, "timestamps": True}
                     if since_ts is not None:
                         log_stream_kwargs["since"] = since_ts
+                    _log_status_gate = [time.monotonic() + 30.0]
                     for line in container.logs(**log_stream_kwargs):
                         asyncio.run_coroutine_threadsafe(
                             log_queue.put(line), loop
                         ).result(timeout=5)
-                        try:
-                            container.reload()
-                            if container.status not in ("running", "paused"):
+                        # Liveness check, THROTTLED to once per ~30s. Previously
+                        # reload() ran on EVERY log line -- a Docker round-trip per
+                        # line. A scan emitting 100k+ lines flooded the daemon,
+                        # slowing every request and starving the event loop (the
+                        # parallel-scan freeze). The stream generator ending already
+                        # stops the loop when a container exits, so a 30s liveness
+                        # poll loses nothing but the wasted daemon load.
+                        if time.monotonic() >= _log_status_gate[0]:
+                            _log_status_gate[0] = time.monotonic() + 30.0
+                            try:
+                                container.reload()
+                                if container.status not in ("running", "paused"):
+                                    break
+                            except Exception:
                                 break
-                        except Exception:
-                            break
                 except Exception as e:
                     logger.error(f"Error in partial recon log reader: {e}")
                 finally:
@@ -1399,7 +1480,7 @@ class ContainerManager:
                     except Exception:
                         pass
 
-            loop.run_in_executor(None, read_logs)
+            loop.run_in_executor(self._log_stream_executor, read_logs)
 
             while True:
                 try:
@@ -1552,10 +1633,12 @@ class ContainerManager:
             if state.status in (AiAttackSurfaceStatus.COMPLETED, AiAttackSurfaceStatus.ERROR):
                 if state.completed_at and (datetime.now(timezone.utc) - state.completed_at).total_seconds() > 60:
                     to_remove.append(run_id)
+        # pop(), not del: to_thread above is an await point, so a concurrent
+        # get_all can remove the same run first (see get_all_partial_recon_statuses).
         for run_id in to_remove:
-            del runs[run_id]
-        if not runs and project_id in self.ai_attack_states:
-            del self.ai_attack_states[project_id]
+            runs.pop(run_id, None)
+        if not runs:
+            self.ai_attack_states.pop(project_id, None)
         return list(runs.values())
 
     async def start_ai_attack_surface(
@@ -1814,14 +1897,24 @@ class ContainerManager:
             def read_logs():
                 try:
                     log_stream_kwargs = {"stream": True, "follow": True, "timestamps": True}
+                    _log_status_gate = [time.monotonic() + 30.0]
                     for line in container.logs(**log_stream_kwargs):
                         asyncio.run_coroutine_threadsafe(log_queue.put(line), loop).result(timeout=5)
-                        try:
-                            container.reload()
-                            if container.status not in ("running", "paused"):
+                        # Liveness check, THROTTLED to once per ~30s. Previously
+                        # reload() ran on EVERY log line -- a Docker round-trip per
+                        # line. A scan emitting 100k+ lines flooded the daemon,
+                        # slowing every request and starving the event loop (the
+                        # parallel-scan freeze). The stream generator ending already
+                        # stops the loop when a container exits, so a 30s liveness
+                        # poll loses nothing but the wasted daemon load.
+                        if time.monotonic() >= _log_status_gate[0]:
+                            _log_status_gate[0] = time.monotonic() + 30.0
+                            try:
+                                container.reload()
+                                if container.status not in ("running", "paused"):
+                                    break
+                            except Exception:
                                 break
-                        except Exception:
-                            break
                 except Exception as e:
                     logger.error(f"Error in AI attack log reader: {e}")
                 finally:
@@ -1830,7 +1923,7 @@ class ContainerManager:
                     except Exception:
                         pass
 
-            loop.run_in_executor(None, read_logs)
+            loop.run_in_executor(self._log_stream_executor, read_logs)
 
             while True:
                 try:
@@ -1899,7 +1992,12 @@ class ContainerManager:
         return f"redamon-gvm-{safe_id}"
 
     async def get_gvm_status(self, project_id: str) -> GvmState:
-        """Get current status of a GVM scan process"""
+        """Get current status of a GVM scan process. Docker inspection runs off
+        the event loop (_run_blocking) so a slow daemon can't stall the worker
+        -- gvm status is polled on the same cadence as recon, same freeze risk."""
+        return await self._run_blocking(self._get_gvm_status_sync, project_id)
+
+    def _get_gvm_status_sync(self, project_id: str) -> GvmState:
         if project_id in self.gvm_states:
             state = self.gvm_states[project_id]
 
@@ -2193,17 +2291,29 @@ class ContainerManager:
 
             def read_logs():
                 try:
+                    # Throttle the per-line liveness reload() below: next allowed
+                    # Docker status poll, in monotonic seconds (list = mutable box).
+                    _log_status_gate = [time.monotonic() + 30.0]
                     for line in container.logs(stream=True, follow=True, timestamps=True):
                         asyncio.run_coroutine_threadsafe(
                             log_queue.put(line),
                             loop
                         ).result(timeout=5)
-                        try:
-                            container.reload()
-                            if container.status not in ("running", "paused"):
+                        # Liveness check, THROTTLED to once per ~30s. Previously
+                        # reload() ran on EVERY log line -- a Docker round-trip per
+                        # line. A scan emitting 100k+ lines flooded the daemon,
+                        # slowing every request and starving the event loop (the
+                        # parallel-scan freeze). The stream generator ending already
+                        # stops the loop when a container exits, so a 30s liveness
+                        # poll loses nothing but the wasted daemon load.
+                        if time.monotonic() >= _log_status_gate[0]:
+                            _log_status_gate[0] = time.monotonic() + 30.0
+                            try:
+                                container.reload()
+                                if container.status not in ("running", "paused"):
+                                    break
+                            except Exception:
                                 break
-                        except Exception:
-                            break
                 except Exception as e:
                     logger.error(f"Error in GVM log reader thread: {e}")
                 finally:
@@ -2215,7 +2325,7 @@ class ContainerManager:
                     except Exception:
                         pass
 
-            loop.run_in_executor(None, read_logs)
+            loop.run_in_executor(self._log_stream_executor, read_logs)
 
             while True:
                 try:
@@ -2299,7 +2409,12 @@ class ContainerManager:
         return f"redamon-github-hunt-{safe_id}"
 
     async def get_github_hunt_status(self, project_id: str) -> GithubHuntState:
-        """Get current status of a GitHub hunt process"""
+        """Get current status of a GitHub hunt process. Docker inspection runs
+        off the event loop (_run_blocking) so a slow daemon can't stall the
+        worker -- same poll cadence and freeze risk as recon."""
+        return await self._run_blocking(self._get_github_hunt_status_sync, project_id)
+
+    def _get_github_hunt_status_sync(self, project_id: str) -> GithubHuntState:
         if project_id in self.github_hunt_states:
             state = self.github_hunt_states[project_id]
 
@@ -2586,17 +2701,29 @@ class ContainerManager:
 
             def read_logs():
                 try:
+                    # Throttle the per-line liveness reload() below: next allowed
+                    # Docker status poll, in monotonic seconds (list = mutable box).
+                    _log_status_gate = [time.monotonic() + 30.0]
                     for line in container.logs(stream=True, follow=True, timestamps=True):
                         asyncio.run_coroutine_threadsafe(
                             log_queue.put(line),
                             loop
                         ).result(timeout=5)
-                        try:
-                            container.reload()
-                            if container.status not in ("running", "paused"):
+                        # Liveness check, THROTTLED to once per ~30s. Previously
+                        # reload() ran on EVERY log line -- a Docker round-trip per
+                        # line. A scan emitting 100k+ lines flooded the daemon,
+                        # slowing every request and starving the event loop (the
+                        # parallel-scan freeze). The stream generator ending already
+                        # stops the loop when a container exits, so a 30s liveness
+                        # poll loses nothing but the wasted daemon load.
+                        if time.monotonic() >= _log_status_gate[0]:
+                            _log_status_gate[0] = time.monotonic() + 30.0
+                            try:
+                                container.reload()
+                                if container.status not in ("running", "paused"):
+                                    break
+                            except Exception:
                                 break
-                        except Exception:
-                            break
                 except Exception as e:
                     logger.error(f"Error in GitHub hunt log reader thread: {e}")
                 finally:
@@ -2608,7 +2735,7 @@ class ContainerManager:
                     except Exception:
                         pass
 
-            loop.run_in_executor(None, read_logs)
+            loop.run_in_executor(self._log_stream_executor, read_logs)
 
             while True:
                 try:
@@ -2684,7 +2811,12 @@ class ContainerManager:
         return f"redamon-trufflehog-{safe_id}"
 
     async def get_trufflehog_status(self, project_id: str) -> TrufflehogState:
-        """Get current status of a TruffleHog scan process"""
+        """Get current status of a TruffleHog scan process. Docker inspection
+        runs off the event loop (_run_blocking) so a slow daemon can't stall the
+        worker -- same poll cadence and freeze risk as recon."""
+        return await self._run_blocking(self._get_trufflehog_status_sync, project_id)
+
+    def _get_trufflehog_status_sync(self, project_id: str) -> TrufflehogState:
         if project_id in self.trufflehog_states:
             state = self.trufflehog_states[project_id]
 
@@ -2971,17 +3103,29 @@ class ContainerManager:
 
             def read_logs():
                 try:
+                    # Throttle the per-line liveness reload() below: next allowed
+                    # Docker status poll, in monotonic seconds (list = mutable box).
+                    _log_status_gate = [time.monotonic() + 30.0]
                     for line in container.logs(stream=True, follow=True, timestamps=True):
                         asyncio.run_coroutine_threadsafe(
                             log_queue.put(line),
                             loop
                         ).result(timeout=5)
-                        try:
-                            container.reload()
-                            if container.status not in ("running", "paused"):
+                        # Liveness check, THROTTLED to once per ~30s. Previously
+                        # reload() ran on EVERY log line -- a Docker round-trip per
+                        # line. A scan emitting 100k+ lines flooded the daemon,
+                        # slowing every request and starving the event loop (the
+                        # parallel-scan freeze). The stream generator ending already
+                        # stops the loop when a container exits, so a 30s liveness
+                        # poll loses nothing but the wasted daemon load.
+                        if time.monotonic() >= _log_status_gate[0]:
+                            _log_status_gate[0] = time.monotonic() + 30.0
+                            try:
+                                container.reload()
+                                if container.status not in ("running", "paused"):
+                                    break
+                            except Exception:
                                 break
-                        except Exception:
-                            break
                 except Exception as e:
                     logger.error(f"Error in TruffleHog log reader thread: {e}")
                 finally:
@@ -2993,7 +3137,7 @@ class ContainerManager:
                     except Exception:
                         pass
 
-            loop.run_in_executor(None, read_logs)
+            loop.run_in_executor(self._log_stream_executor, read_logs)
 
             while True:
                 try:

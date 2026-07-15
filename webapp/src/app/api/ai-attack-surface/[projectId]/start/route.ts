@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { guardProject } from '@/lib/access'
 import prisma from '@/lib/prisma'
 import { orchestratorFetch } from '@/lib/orchestrator'
+import { normalizeOrchestratorStartError } from '@/lib/orchestratorError'
 
 const RECON_ORCHESTRATOR_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://localhost:8010'
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000'
@@ -52,8 +53,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
+      // Governor rejections carry a structured object detail; normalize to a
+      // string message (+ limit) so it is never rendered as a raw React child.
+      const { error, limit } = normalizeOrchestratorStartError(errorData, 'Failed to start AI Gauntlet scan')
       return NextResponse.json(
-        { error: errorData.detail || 'Failed to start AI Gauntlet scan' },
+        { error, ...(limit ? { limit } : {}) },
         { status: response.status },
       )
     }
