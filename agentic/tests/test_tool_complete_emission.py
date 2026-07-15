@@ -79,7 +79,10 @@ from uuid import uuid4
 _agentic_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _agentic_dir)
 
-from orchestrator_helpers.streaming import emit_streaming_events  # noqa: E402
+from orchestrator_helpers.streaming import (  # noqa: E402
+    clear_stale_streaming_state,
+    emit_streaming_events,
+)
 
 
 # =============================================================================
@@ -158,6 +161,73 @@ def _state(*, completed_step: dict | None = None, **extra) -> dict:
         s["_completed_step"] = completed_step
     s.update(extra)
     return s
+
+
+class NewQueryStreamingStateRegression(unittest.IsolatedAsyncioTestCase):
+    """A new query must not replay transient UI events from its checkpoint."""
+
+    async def test_new_query_clears_previous_thinking_and_tool_events(self):
+        cb = _make_callback()
+        checkpoint = {
+            "_decision": {
+                "thought": "stale thought from the completed objective",
+                "reasoning": "stale reasoning",
+                "action": "complete",
+            },
+            "_completed_step": _completed_step(step_id="previous-step"),
+            "_current_step": {
+                "step_id": "previous-current-step",
+                "tool_name": "execute_curl",
+                "tool_args": {"args": "https://example.com"},
+            },
+        }
+
+        query_update = clear_stale_streaming_state({"messages": ["new query"]})
+        merged_state = {**checkpoint, **query_update}
+
+        await emit_streaming_events(merged_state, cb)
+
+        self.assertEqual(merged_state["messages"], ["new query"])
+        self.assertIsNone(merged_state["_decision"])
+        self.assertIsNone(merged_state["_completed_step"])
+        self.assertIsNone(merged_state["_current_step"])
+        cb.on_thinking.assert_not_awaited()
+        cb.on_tool_complete.assert_not_awaited()
+        cb.on_tool_start.assert_not_awaited()
+
+    async def test_streaming_entrypoint_applies_fresh_query_state(self):
+        from orchestrator import AgentOrchestrator
+
+        class CapturingGraph:
+            input_data: dict | None = None
+
+            async def astream(self, input_data, config, stream_mode):
+                self.input_data = input_data
+                yield {"awaiting_tool_confirmation": True}
+
+        graph = CapturingGraph()
+        agent = AgentOrchestrator.__new__(AgentOrchestrator)
+        agent._initialized = True
+        agent.llm = object()
+        agent.graph = graph
+        agent._streaming_callbacks = {}
+        agent._guidance_queues = {}
+        agent._graph_view_cyphers = {}
+        agent._apply_project_settings = MagicMock()
+        agent._build_response = MagicMock(return_value=MagicMock())
+
+        await agent.invoke_with_streaming(
+            question="new objective",
+            user_id="user",
+            project_id="project",
+            session_id="session",
+            streaming_callback=_make_callback(),
+        )
+
+        self.assertIsNotNone(graph.input_data)
+        self.assertIsNone(graph.input_data["_decision"])
+        self.assertIsNone(graph.input_data["_completed_step"])
+        self.assertIsNone(graph.input_data["_current_step"])
 
 
 # =============================================================================
