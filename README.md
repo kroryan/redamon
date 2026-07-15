@@ -655,6 +655,8 @@ Every safety guarantee that applies to the root agent also applies to every memb
 
 Supports **5 providers** and **400+ models**: OpenAI (GPT-5.2, GPT-5, GPT-4.1), Anthropic (Claude Opus 4.6, Sonnet 4.5), OpenRouter (300+ models), AWS Bedrock, and any **OpenAI-compatible endpoint** (Ollama, vLLM, LM Studio, Groq, etc.). Models are dynamically fetched, no hardcoded lists.
 
+OpenAI-compatible provider settings include an **Ollama reasoning** control. Enable it to send `reasoning_effort` with `low`, `medium`, `high`, or `max`; leave it disabled to send `none` to recognized Ollama endpoints. The available effort levels are model-dependent. Canonical OpenAI providers and unrelated OpenAI-compatible endpoints keep their existing behavior.
+
 > **[Wiki: AI Model Providers](https://github.com/samugit83/redamon/wiki/AI-Model-Providers)**
 
 ### Attack Surface Graph

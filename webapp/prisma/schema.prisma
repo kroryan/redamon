@@ -56,6 +56,10 @@ model UserLlmProvider {
   temperature     Float    @default(0)
   maxTokens       Int      @default(16384) @map("max_tokens")
   sslVerify       Boolean  @default(true) @map("ssl_verify")
+  // Ollama/OpenAI-compatible reasoning control. Disabled Ollama providers send
+  // reasoning_effort=none; enabled providers send the selected effort level.
+  reasoningEnabled Boolean @default(false) @map("reasoning_enabled")
+  reasoningEffort  String  @default("high") @map("reasoning_effort")
 
   // Bedrock only. Two mutually exclusive auth modes:
   //   - IAM: awsAccessKeyId + awsSecretKey (legacy SigV4 path)

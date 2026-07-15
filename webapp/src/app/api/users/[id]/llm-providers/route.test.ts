@@ -137,6 +137,44 @@ describe('POST /api/users/[id]/llm-providers — I1 ownership', () => {
     expect(mockCreate).toHaveBeenCalled()
   })
 
+  test('owner persists Ollama reasoning controls', async () => {
+    mockIsInternal.mockReturnValue(false)
+    mockGetSession.mockResolvedValue({ userId: 'victim', role: 'user' })
+    const res = await POST(postReq('victim', {
+      providerType: 'openai_compatible',
+      name: 'Ollama',
+      baseUrl: 'http://host.docker.internal:11434/v1',
+      modelIdentifier: 'gemma4:latest',
+      reasoningEnabled: true,
+      reasoningEffort: 'max',
+    }), params('victim'))
+
+    expect(res.status).toBe(201)
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        reasoningEnabled: true,
+        reasoningEffort: 'max',
+      }),
+    }))
+  })
+
+  test('rejects an invalid reasoning effort before writing', async () => {
+    mockIsInternal.mockReturnValue(false)
+    mockGetSession.mockResolvedValue({ userId: 'victim', role: 'user' })
+    const res = await POST(postReq('victim', {
+      providerType: 'openai_compatible',
+      name: 'Ollama',
+      baseUrl: 'http://host.docker.internal:11434/v1',
+      modelIdentifier: 'gemma4:latest',
+      reasoningEnabled: true,
+      reasoningEffort: 'extreme',
+    }), params('victim'))
+
+    expect(res.status).toBe(400)
+    expect(mockCreate).not.toHaveBeenCalled()
+    expect((await res.json()).error).toContain('low, medium, high, max')
+  })
+
   test('S2/E2: internal-key caller can NO LONGER create providers (bypass removed) → 401, no write', async () => {
     // Was 201 (internal key bypassed ownership). Now key possession alone must
     // not be able to attach a harvestable secret to an arbitrary account.

@@ -1,6 +1,7 @@
 """LLM initialization and project settings helpers."""
 
 import logging
+from urllib.parse import urlsplit
 
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
@@ -10,6 +11,8 @@ from project_settings import load_project_settings
 from orchestrator_helpers.llm_url_guard import validate_llm_base_url
 
 logger = logging.getLogger(__name__)
+
+OLLAMA_REASONING_EFFORTS = frozenset({"low", "medium", "high", "max"})
 
 # Anthropic models that reject the `temperature` parameter (HTTP 400
 # "temperature is deprecated for this model"). Anthropic deprecated the param
@@ -39,6 +42,39 @@ def _anthropic_supports_temperature(model_id: str) -> bool:
     if model_id in ANTHROPIC_NO_TEMPERATURE_MODELS:
         return False
     return not any(model_id.startswith(p) for p in ANTHROPIC_NO_TEMPERATURE_PREFIXES)
+
+
+def _is_ollama_endpoint(base_url: str | None) -> bool:
+    """Identify standard local, remote, containerized, and cloud Ollama URLs."""
+    if not base_url:
+        return False
+    try:
+        parsed = urlsplit(base_url)
+        hostname = (parsed.hostname or "").lower()
+        return parsed.port == 11434 or "ollama" in hostname
+    except ValueError:
+        return False
+
+
+def _resolve_reasoning_effort(custom_llm_config: dict) -> str | None:
+    """Return the OpenAI-compatible reasoning value to send, if any.
+
+    Enabling the control is an explicit opt-in and works through reverse
+    proxies. When disabled, ``none`` is sent only to recognizable Ollama
+    endpoints so unrelated OpenAI-compatible providers remain unchanged.
+    """
+    enabled = custom_llm_config.get("reasoningEnabled") is True
+    effort = str(custom_llm_config.get("reasoningEffort", "high")).lower()
+
+    if enabled:
+        if effort not in OLLAMA_REASONING_EFFORTS:
+            allowed = ", ".join(sorted(OLLAMA_REASONING_EFFORTS))
+            raise ValueError(f"Invalid reasoning effort '{effort}'. Expected one of: {allowed}")
+        return effort
+
+    if _is_ollama_endpoint(custom_llm_config.get("baseUrl")):
+        return "none"
+    return None
 
 
 def parse_model_provider(model_name: str) -> tuple[str, str]:
@@ -186,6 +222,9 @@ def setup_llm(
                 # ChatOpenAI aggregates the chunks into one AIMessage.
                 kwargs["streaming"] = True
                 kwargs["stream_usage"] = True
+                reasoning_effort = _resolve_reasoning_effort(custom_llm_config)
+                if reasoning_effort is not None:
+                    kwargs["reasoning_effort"] = reasoning_effort
             base_url = custom_llm_config.get("baseUrl")
             ssl_verify = custom_llm_config.get("sslVerify", True)
             # SSRF guard (I15) + TLS-off-on-public guard (I16). Localhost/LAN
