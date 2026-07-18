@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.3] - 2026-07-19
+
+### Added
+
+- **Per-provider reasoning effort for OpenAI-compatible (Ollama) providers.** Global Settings -> LLM Providers now exposes an opt-in control (`low`/`medium`/`high`/`max`) forwarded as `reasoning_effort`. Left disabled it sends nothing, preserving the model's default thinking behavior.
+
+### Fixed
+
+- **Reasoning on a non-thinking model no longer breaks the run.** Such models reject `reasoning_effort` with a permanent 400; `retry_llm_call` now drops the param and retries once, mirroring the existing `temperature` self-heal.
+- **Truncated LLM JSON decisions are recovered.** A conservative scanner closes only unambiguous trailing `}`/`]`, so a decision cut off at the token limit no longer fails the step.
+- **New queries no longer replay the previous turn's thinking and tool events.** Transient streaming state is cleared when a query merges into an existing session checkpoint.
+
+---
+
 ## [6.0.2] - 2026-07-15
 
 ### Fixed
