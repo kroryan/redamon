@@ -5,6 +5,8 @@ import { Loader2, CheckCircle, XCircle, Plus, Trash2, Eye, EyeOff, ExternalLink 
 import { useToast } from '@/components/ui'
 import { PROVIDER_TYPES, OPENAI_COMPAT_PRESETS } from '@/lib/llmProviderPresets'
 import type { ProviderType } from '@/lib/llmProviderPresets'
+import { REASONING_EFFORTS } from '@/lib/llmReasoning'
+import type { ReasoningEffort } from '@/lib/llmReasoning'
 import styles from './Settings.module.css'
 
 interface LlmProviderFormProps {
@@ -27,6 +29,8 @@ export interface ProviderData {
   temperature: number
   maxTokens: number
   sslVerify: boolean
+  reasoningEnabled: boolean
+  reasoningEffort: ReasoningEffort
   awsRegion: string
   awsAccessKeyId: string
   awsSecretKey: string
@@ -46,6 +50,8 @@ const EMPTY_PROVIDER: ProviderData = {
   temperature: 0,
   maxTokens: 16384,
   sslVerify: true,
+  reasoningEnabled: false,
+  reasoningEffort: 'high',
   awsRegion: 'us-east-1',
   awsAccessKeyId: '',
   awsSecretKey: '',
@@ -55,7 +61,13 @@ const EMPTY_PROVIDER: ProviderData = {
 export function LlmProviderForm({ userId, provider, existingProviderTypes = [], onSave, onCancel }: LlmProviderFormProps) {
   const isEditing = !!provider?.id
   const toast = useToast()
-  const [form, setForm] = useState<ProviderData>(() => provider || { ...EMPTY_PROVIDER })
+  const [form, setForm] = useState<ProviderData>(() => ({
+    ...EMPTY_PROVIDER,
+    ...(provider || {}),
+    defaultHeaders: provider?.defaultHeaders || {},
+    reasoningEnabled: provider?.reasoningEnabled ?? false,
+    reasoningEffort: provider?.reasoningEffort || 'high',
+  }))
   const [step, setStep] = useState<'type' | 'config'>(isEditing || form.providerType ? 'config' : 'type')
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -393,6 +405,34 @@ export function LlmProviderForm({ userId, provider, existingProviderTypes = [], 
               placeholder="Optional (leave empty for Ollama)"
             />
             <span className="formHint">Leave empty for local servers that don&apos;t require auth</span>
+          </div>
+
+          <div className={styles.reasoningControl}>
+            <label className={styles.checkboxLabel}>
+              <input
+                type="checkbox"
+                checked={form.reasoningEnabled}
+                onChange={e => updateForm('reasoningEnabled', e.target.checked)}
+              />
+              <span>Enable Ollama reasoning</span>
+            </label>
+            <select
+              className="select"
+              aria-label="Ollama reasoning effort"
+              value={form.reasoningEffort}
+              disabled={!form.reasoningEnabled}
+              onChange={e => updateForm('reasoningEffort', e.target.value as ReasoningEffort)}
+            >
+              {REASONING_EFFORTS.map(effort => (
+                <option key={effort} value={effort}>
+                  {effort.charAt(0).toUpperCase() + effort.slice(1)}
+                </option>
+              ))}
+            </select>
+            <span className="formHint">
+              Sends Ollama&apos;s <code>reasoning_effort</code> control. When disabled,
+              recognized Ollama endpoints use <code>none</code>. Level support depends on the model.
+            </span>
           </div>
 
           {/* Extra headers */}

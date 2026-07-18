@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const mockFindFirst = vi.fn()
 const mockDelete = vi.fn()
+const mockUpdate = vi.fn()
 const mockRequireUserAccess = vi.fn()
 const mockIsInternal = vi.fn()
 
@@ -17,6 +18,7 @@ vi.mock('@/lib/prisma', () => ({
     userLlmProvider: {
       findFirst: (...a: unknown[]) => mockFindFirst(...a),
       delete: (...a: unknown[]) => mockDelete(...a),
+      update: (...a: unknown[]) => mockUpdate(...a),
     },
   },
 }))
@@ -25,20 +27,51 @@ vi.mock('@/lib/session', () => ({
   isInternalRequest: (...a: unknown[]) => mockIsInternal(...a),
 }))
 
-import { GET, DELETE } from './route'
+import { GET, PUT, DELETE } from './route'
 
 const SECRET = 'sk-PROVIDERSECRET1234'
 const PROVIDER = { id: 'p1', userId: 'victim', apiKey: SECRET, awsAccessKeyId: '', awsSecretKey: '', awsBearerToken: '' }
 const FORBIDDEN = NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 function get(url: string): NextRequest { return new NextRequest(url) }
 function del(): NextRequest { return new NextRequest('http://x/api/users/victim/llm-providers/p1', { method: 'DELETE' }) }
+function put(body: unknown): NextRequest {
+  return new NextRequest('http://x/api/users/victim/llm-providers/p1', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
 const params = (id: string, providerId: string) => ({ params: Promise.resolve({ id, providerId }) })
 
 beforeEach(() => {
   mockFindFirst.mockReset().mockResolvedValue(PROVIDER)
   mockDelete.mockReset().mockResolvedValue({})
+  mockUpdate.mockReset().mockResolvedValue(PROVIDER)
   mockRequireUserAccess.mockReset()
   mockIsInternal.mockReset()
+})
+
+describe('PUT provider — reasoning controls', () => {
+  test('owner updates reasoning enabled state and effort', async () => {
+    mockRequireUserAccess.mockResolvedValue(null)
+    const res = await PUT(put({ reasoningEnabled: true, reasoningEffort: 'medium' }), params('victim', 'p1'))
+
+    expect(res.status).toBe(200)
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        reasoningEnabled: true,
+        reasoningEffort: 'medium',
+      }),
+    }))
+  })
+
+  test('rejects invalid effort without updating', async () => {
+    mockRequireUserAccess.mockResolvedValue(null)
+    const res = await PUT(put({ reasoningEnabled: true, reasoningEffort: 'extreme' }), params('victim', 'p1'))
+
+    expect(res.status).toBe(400)
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
 })
 
 describe('GET provider — I1', () => {

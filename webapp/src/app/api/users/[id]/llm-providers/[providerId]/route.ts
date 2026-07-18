@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { isInternalRequest, requireUserAccess } from '@/lib/session'
+import { isReasoningEffort } from '@/lib/llmReasoning'
 
 interface RouteParams {
   params: Promise<{ id: string; providerId: string }>
@@ -63,6 +64,19 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (denied) return denied
 
     const body = await request.json()
+
+    if (body.reasoningEnabled !== undefined && typeof body.reasoningEnabled !== 'boolean') {
+      return NextResponse.json(
+        { error: 'reasoningEnabled must be a boolean' },
+        { status: 400 }
+      )
+    }
+    if (body.reasoningEffort !== undefined && !isReasoningEffort(body.reasoningEffort)) {
+      return NextResponse.json(
+        { error: 'reasoningEffort must be one of: low, medium, high, max' },
+        { status: 400 }
+      )
+    }
 
     // Verify the provider belongs to the target user
     const existing = await prisma.userLlmProvider.findFirst({

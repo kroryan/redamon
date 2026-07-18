@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession, isInternalRequest } from '@/lib/session'
+import { isReasoningEffort } from '@/lib/llmReasoning'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -104,6 +105,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           { status: 400 }
         )
       }
+      if (body.reasoningEnabled !== undefined && typeof body.reasoningEnabled !== 'boolean') {
+        return NextResponse.json(
+          { error: 'reasoningEnabled must be a boolean' },
+          { status: 400 }
+        )
+      }
+      if (body.reasoningEffort !== undefined && !isReasoningEffort(body.reasoningEffort)) {
+        return NextResponse.json(
+          { error: 'reasoningEffort must be one of: low, medium, high, max' },
+          { status: 400 }
+        )
+      }
     }
 
     const provider = await prisma.userLlmProvider.create({
@@ -119,6 +132,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         temperature: body.temperature ?? 0,
         maxTokens: body.maxTokens ?? 16384,
         sslVerify: body.sslVerify ?? true,
+        reasoningEnabled: providerType === 'openai_compatible' ? body.reasoningEnabled ?? false : false,
+        reasoningEffort: providerType === 'openai_compatible' ? body.reasoningEffort ?? 'high' : 'high',
         awsRegion: body.awsRegion || 'us-east-1',
         awsAccessKeyId: body.awsAccessKeyId || '',
         awsSecretKey: body.awsSecretKey || '',

@@ -6,7 +6,7 @@ import logging
 from typing import Optional, Tuple
 
 from state import LLMDecision, OutputAnalysis, ExtractedTargetInfo, ToolPlan
-from .json_utils import extract_json
+from .json_utils import extract_json, repair_trailing_json_delimiters
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,22 @@ def try_parse_llm_decision(response_text: str) -> Tuple[Optional[LLMDecision], O
 
         # Pre-process JSON to handle empty nested objects that would fail validation
         # LLM sometimes outputs empty objects like user_question: {} or phase_transition: {}
-        data = json.loads(json_str)
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as original_error:
+            repaired_json = repair_trailing_json_delimiters(json_str)
+            if not repaired_json:
+                raise
+            try:
+                data = json.loads(repaired_json)
+            except json.JSONDecodeError:
+                # Preserve the original diagnostic when trailing delimiters
+                # were not the complete cause of the malformed response.
+                raise original_error
+            logger.warning(
+                "Recovered LLM JSON response by appending %d trailing delimiter(s)",
+                len(repaired_json) - len(json_str),
+            )
 
         # Remove empty user_question object (would fail validation due to required fields)
         if "user_question" in data and (not data["user_question"] or data["user_question"] == {}):

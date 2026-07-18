@@ -362,6 +362,28 @@
   gap: var(--space-3);
 }
 
+.reasoningControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 180px);
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-default);
+}
+
+.reasoningControl :global(.formHint) {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.reasoningControl select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 /* Test connection */
 .testSection {
   display: flex;
@@ -458,4 +480,3 @@
   color: var(--text-primary);
   background: var(--bg-secondary);
 }
-

@@ -36,7 +36,7 @@ from orchestrator_helpers import (
     get_config_values,
 )
 from orchestrator_helpers.llm_setup import setup_llm, apply_project_settings
-from orchestrator_helpers.streaming import emit_streaming_events
+from orchestrator_helpers.streaming import clear_stale_streaming_state, emit_streaming_events
 from orchestrator_helpers.nodes import (
     initialize_node,
     think_node,
@@ -1308,9 +1308,9 @@ class AgentOrchestrator:
 
         try:
             config = create_config(user_id, project_id, session_id)
-            input_data = {
+            input_data = clear_stale_streaming_state({
                 "messages": [HumanMessage(content=question)]
-            }
+            })
 
             # Stream graph execution
             final_state = None

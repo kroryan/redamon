@@ -17,7 +17,7 @@ import logging
 import os
 import re
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Literal, Optional
 
 import httpx
 import websockets
@@ -1789,6 +1789,8 @@ class LlmProviderTestRequest(BaseModel):
     temperature: float = 0
     maxTokens: int = 16384
     sslVerify: bool = True
+    reasoningEnabled: bool = False
+    reasoningEffort: Literal["low", "medium", "high", "max"] = "high"
     awsRegion: str = "us-east-1"
     awsAccessKeyId: str = ""
     awsSecretKey: str = ""
@@ -1901,7 +1903,6 @@ async def test_llm_provider(body: LlmProviderTestRequest):
                 aws_region=body.awsRegion,
             )
         elif ptype == "openai_compatible":
-            from langchain_openai import ChatOpenAI
             from orchestrator_helpers.llm_url_guard import (
                 BaseUrlValidationError,
                 validate_llm_base_url,
@@ -1916,23 +1917,12 @@ async def test_llm_provider(body: LlmProviderTestRequest):
                     content={"success": False, "error": str(e)},
                     status_code=400,
                 )
-            kwargs = dict(
-                model=body.modelIdentifier or "default",
-                api_key=body.apiKey or "ollama",
-                temperature=body.temperature,
-                max_tokens=body.maxTokens,
+            # Exercise the same construction path used by real agent sessions,
+            # including SSE and Ollama reasoning controls.
+            llm = setup_llm(
+                "custom/provider-test",
+                custom_llm_config=body.model_dump(),
             )
-            if body.baseUrl:
-                kwargs["base_url"] = body.baseUrl
-            if body.defaultHeaders:
-                kwargs["default_headers"] = body.defaultHeaders
-            if body.timeout:
-                kwargs["timeout"] = float(body.timeout)
-            if not body.sslVerify:
-                import httpx
-                kwargs["http_client"] = httpx.Client(verify=False)
-                kwargs["http_async_client"] = httpx.AsyncClient(verify=False)
-            llm = ChatOpenAI(**kwargs)
         else:
             return JSONResponse(
                 content={"success": False, "error": f"Unknown provider type: {ptype}"},

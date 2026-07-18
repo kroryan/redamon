@@ -7,6 +7,29 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+_STREAMING_TRANSIENT_FIELDS = (
+    "_decision",
+    "_completed_step",
+    "_current_step",
+)
+
+
+def clear_stale_streaming_state(update: dict) -> dict:
+    """Return a graph update that starts a fresh client-visible stream.
+
+    LangGraph merges a new query into the existing checkpoint.  A new
+    ``StreamingCallback`` has empty deduplication sets, so transient fields
+    left by the previous run would otherwise be emitted again before the
+    initialize node gets a chance to replace them.  Explicit ``None`` values
+    clear those fields during the initial merge while preserving the durable
+    conversation state.
+    """
+    return {
+        **update,
+        **dict.fromkeys(_STREAMING_TRANSIENT_FIELDS),
+    }
+
+
 def detect_generated_file(step: dict) -> dict | None:
     """Detect if a tool execution created a downloadable file in /tmp/.
 
