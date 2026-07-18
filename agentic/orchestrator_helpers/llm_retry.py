@@ -78,6 +78,35 @@ def _is_temperature_unsupported_error(exc: BaseException) -> bool:
     return "temperature" in s and any(h in s for h in _TEMPERATURE_UNSUPPORTED_HINTS)
 
 
+def _is_thinking_unsupported_error(exc: BaseException) -> bool:
+    """A model without the thinking capability rejects `reasoning_effort` with a
+    permanent 400, e.g. Ollama's `"<model>" does not support thinking`. Like the
+    temperature case this is not transient but IS auto-recoverable: drop
+    reasoning_effort and retry. Lets a user who enabled reasoning on a
+    non-thinking model keep running instead of bricking every LLM call.
+    """
+    s = str(exc).lower()
+    return "thinking" in s and any(h in s for h in _TEMPERATURE_UNSUPPORTED_HINTS)
+
+
+def _without_reasoning_effort(llm: Any) -> Any:
+    """Return a copy of the chat model with `reasoning_effort` removed (set to
+    None, which LangChain omits from the request), or None if a copy can't be
+    made. Mirrors ``_without_temperature``; never mutates the original ``llm``.
+    """
+    try:
+        return llm.model_copy(update={"reasoning_effort": None})
+    except Exception:
+        pass
+    try:
+        import copy
+        clone = copy.copy(llm)
+        clone.reasoning_effort = None
+        return clone
+    except Exception:
+        return None
+
+
 def _without_temperature(llm: Any) -> Any:
     """Return a copy of the chat model with `temperature` removed (set to None,
     which LangChain omits from the request), or None if a copy can't be made.
@@ -137,6 +166,7 @@ async def retry_llm_call(
     """
     last_exc: BaseException | None = None
     healed_temperature = False
+    healed_reasoning = False
     for attempt in range(max_attempts):
         try:
             return await llm.ainvoke(messages)
@@ -153,6 +183,24 @@ async def retry_llm_call(
                     llm = neutered
                     logger.warning(
                         "[%s] model rejected `temperature`; retrying without it.",
+                        label,
+                    )
+                    try:
+                        return await llm.ainvoke(messages)
+                    except Exception as exc2:
+                        last_exc = exc2
+                        exc = exc2
+            # Self-heal (once): a non-thinking model rejects `reasoning_effort`
+            # with a permanent 400. Drop it and retry so a provider that enabled
+            # reasoning on a model without the thinking capability keeps working.
+            if (not healed_reasoning) and _is_thinking_unsupported_error(exc):
+                neutered = _without_reasoning_effort(llm)
+                if neutered is not None:
+                    healed_reasoning = True
+                    llm = neutered
+                    logger.warning(
+                        "[%s] model does not support thinking; retrying without "
+                        "`reasoning_effort`.",
                         label,
                     )
                     try:

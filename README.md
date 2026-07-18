@@ -23,7 +23,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v6.0.2-release-2E8B57?style=flat" alt="Version 6.0.2"/>
+  <img height="24" src="https://img.shields.io/badge/v6.0.3-release-2E8B57?style=flat" alt="Version 6.0.3"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <a href="readmes/README.SECURITY_POSTURE.md"><img height="24" src="https://img.shields.io/badge/SECURE%20BY%20DESIGN-STRIDE%20THREAT%20MODELED-2E7D32?style=flat&logo=shield&logoColor=white" alt="Secure by Design, STRIDE Threat Modeled"/></a>
@@ -655,7 +655,7 @@ Every safety guarantee that applies to the root agent also applies to every memb
 
 Supports **5 providers** and **400+ models**: OpenAI (GPT-5.2, GPT-5, GPT-4.1), Anthropic (Claude Opus 4.6, Sonnet 4.5), OpenRouter (300+ models), AWS Bedrock, and any **OpenAI-compatible endpoint** (Ollama, vLLM, LM Studio, Groq, etc.). Models are dynamically fetched, no hardcoded lists.
 
-OpenAI-compatible provider settings include an **Ollama reasoning** control. Enable it to send `reasoning_effort` with `low`, `medium`, `high`, or `max`; leave it disabled to send `none` to recognized Ollama endpoints. The available effort levels are model-dependent. Canonical OpenAI providers and unrelated OpenAI-compatible endpoints keep their existing behavior.
+OpenAI-compatible provider settings include a **reasoning effort** control. Enable it to send `reasoning_effort` with `low`, `medium`, `high`, or `max`; leave it disabled to send nothing and use the model's default. Enable it only for thinking-capable models: a model without the thinking capability rejects a level, and the agent transparently retries without it. The available effort levels are model-dependent. Canonical OpenAI providers and unrelated OpenAI-compatible endpoints keep their existing behavior.
 
 > **[Wiki: AI Model Providers](https://github.com/samugit83/redamon/wiki/AI-Model-Providers)**
 

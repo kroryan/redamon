@@ -31,9 +31,13 @@ class OllamaReasoningControlTests(unittest.TestCase):
             },
         )
 
-    def test_disabled_ollama_sends_none(self):
+    def test_disabled_sends_nothing(self):
+        # Disabled means no reasoning_effort at all, so the model's own default
+        # thinking behavior is preserved (no auto "none").
         llm = self._build(enabled=False)
-        self.assertEqual(llm.reasoning_effort, "none")
+        self.assertIsNone(llm.reasoning_effort)
+        payload = llm._get_request_payload([HumanMessage(content="Hello")])
+        self.assertNotIn("reasoning_effort", payload)
 
     def test_all_supported_effort_levels_are_forwarded(self):
         for effort in ("low", "medium", "high", "max"):
@@ -43,7 +47,7 @@ class OllamaReasoningControlTests(unittest.TestCase):
                 payload = llm._get_request_payload([HumanMessage(content="Hello")])
                 self.assertEqual(payload["reasoning_effort"], effort)
 
-    def test_disabled_non_ollama_provider_is_unchanged(self):
+    def test_disabled_non_ollama_provider_sends_nothing(self):
         llm = self._build(
             enabled=False,
             base_url="https://api.example.com/v1",

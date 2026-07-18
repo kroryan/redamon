@@ -1,7 +1,6 @@
 """LLM initialization and project settings helpers."""
 
 import logging
-from urllib.parse import urlsplit
 
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
@@ -44,37 +43,24 @@ def _anthropic_supports_temperature(model_id: str) -> bool:
     return not any(model_id.startswith(p) for p in ANTHROPIC_NO_TEMPERATURE_PREFIXES)
 
 
-def _is_ollama_endpoint(base_url: str | None) -> bool:
-    """Identify standard local, remote, containerized, and cloud Ollama URLs."""
-    if not base_url:
-        return False
-    try:
-        parsed = urlsplit(base_url)
-        hostname = (parsed.hostname or "").lower()
-        return parsed.port == 11434 or "ollama" in hostname
-    except ValueError:
-        return False
-
-
 def _resolve_reasoning_effort(custom_llm_config: dict) -> str | None:
-    """Return the OpenAI-compatible reasoning value to send, if any.
+    """Return the OpenAI-compatible ``reasoning_effort`` value to send, if any.
 
     Enabling the control is an explicit opt-in and works through reverse
-    proxies. When disabled, ``none`` is sent only to recognizable Ollama
-    endpoints so unrelated OpenAI-compatible providers remain unchanged.
+    proxies. When disabled we send nothing at all, so the model's own default
+    thinking behavior is preserved and unrelated OpenAI-compatible providers
+    are untouched. Enabling reasoning on a model that lacks the thinking
+    capability makes the endpoint reject the request; ``retry_llm_call``
+    self-heals that by dropping ``reasoning_effort`` and retrying once.
     """
-    enabled = custom_llm_config.get("reasoningEnabled") is True
+    if custom_llm_config.get("reasoningEnabled") is not True:
+        return None
+
     effort = str(custom_llm_config.get("reasoningEffort", "high")).lower()
-
-    if enabled:
-        if effort not in OLLAMA_REASONING_EFFORTS:
-            allowed = ", ".join(sorted(OLLAMA_REASONING_EFFORTS))
-            raise ValueError(f"Invalid reasoning effort '{effort}'. Expected one of: {allowed}")
-        return effort
-
-    if _is_ollama_endpoint(custom_llm_config.get("baseUrl")):
-        return "none"
-    return None
+    if effort not in OLLAMA_REASONING_EFFORTS:
+        allowed = ", ".join(sorted(OLLAMA_REASONING_EFFORTS))
+        raise ValueError(f"Invalid reasoning effort '{effort}'. Expected one of: {allowed}")
+    return effort
 
 
 def parse_model_provider(model_name: str) -> tuple[str, str]:

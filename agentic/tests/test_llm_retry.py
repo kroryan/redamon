@@ -49,6 +49,10 @@ class _PermanentAuthError(Exception):
     """Non-transient; must NOT trigger retry."""
 
 
+class _ThinkingUnsupportedError(Exception):
+    """Synthetic Ollama 400 for a model without the thinking capability."""
+
+
 _VALID_RESPONSE = MagicMock(content='{"thought":"t","reasoning":"r","action":"complete"}')
 
 
@@ -209,6 +213,86 @@ class RetryLLMCallTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_llm.ainvoke.await_count, 1,
                          "token-limit error must fail fast — no retry")
         self.assertEqual(sleep.await_count, 0)
+
+
+class ReasoningSelfHealTests(unittest.IsolatedAsyncioTestCase):
+    """A non-thinking model that rejects ``reasoning_effort`` must self-heal:
+    drop the param and retry once, so a provider that enabled reasoning on a
+    model without the thinking capability keeps working instead of failing
+    every call. Mirrors the existing ``temperature`` self-heal."""
+
+    async def _invoke(self, mock_llm, *, max_attempts: int = 3):
+        from orchestrator_helpers.llm_retry import retry_llm_call
+        with patch(
+            "orchestrator_helpers.llm_retry.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            try:
+                return await retry_llm_call(
+                    mock_llm, ["msg"], label="test", max_attempts=max_attempts,
+                ), None
+            except Exception as exc:
+                return None, exc
+
+    def _healable_llm(self, *, healed_ainvoke):
+        """A mock LLM whose ``model_copy`` yields a healed clone."""
+        healed = MagicMock()
+        healed.ainvoke = healed_ainvoke
+        llm = MagicMock()
+        llm.model_copy = MagicMock(return_value=healed)
+        return llm, healed
+
+    async def test_thinking_unsupported_heals_and_retries(self):
+        llm, healed = self._healable_llm(
+            healed_ainvoke=AsyncMock(return_value=_VALID_RESPONSE),
+        )
+        llm.ainvoke = AsyncMock(
+            side_effect=_ThinkingUnsupportedError(
+                '"gemma3:latest" does not support thinking'
+            )
+        )
+        result, exc = await self._invoke(llm)
+        self.assertIs(result, _VALID_RESPONSE)
+        self.assertIsNone(exc)
+        # Original tried once, then the reasoning-stripped clone succeeded.
+        self.assertEqual(llm.ainvoke.await_count, 1)
+        self.assertEqual(healed.ainvoke.await_count, 1)
+        llm.model_copy.assert_called_once_with(update={"reasoning_effort": None})
+
+    async def test_thinking_heal_only_attempted_once(self):
+        # The stripped clone STILL raises the thinking error (pathological):
+        # we must not loop re-healing; after one heal the error is classified
+        # non-transient and re-raised.
+        persistent = _ThinkingUnsupportedError('"x" does not support thinking')
+        llm, healed = self._healable_llm(
+            healed_ainvoke=AsyncMock(side_effect=persistent),
+        )
+        llm.ainvoke = AsyncMock(side_effect=persistent)
+        result, exc = await self._invoke(llm)
+        self.assertIs(exc, persistent)
+        self.assertEqual(llm.ainvoke.await_count, 1)
+        self.assertEqual(healed.ainvoke.await_count, 1,
+                         "reasoning heal must be attempted exactly once")
+
+    async def test_helpers_classify_and_strip(self):
+        from orchestrator_helpers.llm_retry import (
+            _is_thinking_unsupported_error,
+            _without_reasoning_effort,
+        )
+        self.assertTrue(_is_thinking_unsupported_error(
+            _ThinkingUnsupportedError('"m" does not support thinking')))
+        # A plain thinking mention without an "unsupported" hint is NOT a match.
+        self.assertFalse(_is_thinking_unsupported_error(
+            Exception("thinking budget exceeded")))
+        # Temperature errors are handled by the other heal, not this one.
+        self.assertFalse(_is_thinking_unsupported_error(
+            Exception("temperature is not supported")))
+
+        llm = MagicMock()
+        clone = MagicMock()
+        llm.model_copy = MagicMock(return_value=clone)
+        self.assertIs(_without_reasoning_effort(llm), clone)
+        llm.model_copy.assert_called_once_with(update={"reasoning_effort": None})
 
 
 if __name__ == "__main__":

@@ -414,11 +414,11 @@ export function LlmProviderForm({ userId, provider, existingProviderTypes = [], 
                 checked={form.reasoningEnabled}
                 onChange={e => updateForm('reasoningEnabled', e.target.checked)}
               />
-              <span>Enable Ollama reasoning</span>
+              <span>Enable reasoning effort</span>
             </label>
             <select
               className="select"
-              aria-label="Ollama reasoning effort"
+              aria-label="Reasoning effort"
               value={form.reasoningEffort}
               disabled={!form.reasoningEnabled}
               onChange={e => updateForm('reasoningEffort', e.target.value as ReasoningEffort)}
@@ -430,8 +430,9 @@ export function LlmProviderForm({ userId, provider, existingProviderTypes = [], 
               ))}
             </select>
             <span className="formHint">
-              Sends Ollama&apos;s <code>reasoning_effort</code> control. When disabled,
-              recognized Ollama endpoints use <code>none</code>. Level support depends on the model.
+              Sends <code>reasoning_effort</code> to the endpoint. When disabled, nothing
+              is sent and the model&apos;s default is used. Enable only for thinking-capable
+              models; others reject a level (the agent auto-retries without it).
             </span>
           </div>
 

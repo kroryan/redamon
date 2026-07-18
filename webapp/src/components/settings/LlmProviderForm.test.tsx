@@ -57,8 +57,8 @@ describe('LlmProviderForm Ollama reasoning control', () => {
       />,
     )
 
-    const toggle = screen.getByRole('checkbox', { name: 'Enable Ollama reasoning' })
-    const effort = screen.getByRole('combobox', { name: 'Ollama reasoning effort' })
+    const toggle = screen.getByRole('checkbox', { name: 'Enable reasoning effort' })
+    const effort = screen.getByRole('combobox', { name: 'Reasoning effort' })
     expect(toggle).not.toBeChecked()
     expect(effort).toBeDisabled()
 

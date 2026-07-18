@@ -54,13 +54,33 @@ beforeEach(() => {
 describe('PUT provider — reasoning controls', () => {
   test('owner updates reasoning enabled state and effort', async () => {
     mockRequireUserAccess.mockResolvedValue(null)
-    const res = await PUT(put({ reasoningEnabled: true, reasoningEffort: 'medium' }), params('victim', 'p1'))
+    const res = await PUT(
+      put({ providerType: 'openai_compatible', reasoningEnabled: true, reasoningEffort: 'medium' }),
+      params('victim', 'p1'),
+    )
 
     expect(res.status).toBe(200)
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         reasoningEnabled: true,
         reasoningEffort: 'medium',
+      }),
+    }))
+  })
+
+  test('non-compat provider cannot persist reasoning controls', async () => {
+    mockRequireUserAccess.mockResolvedValue(null)
+    mockFindFirst.mockResolvedValue({ ...PROVIDER, providerType: 'anthropic' })
+    const res = await PUT(
+      put({ providerType: 'anthropic', reasoningEnabled: true, reasoningEffort: 'medium' }),
+      params('victim', 'p1'),
+    )
+
+    expect(res.status).toBe(200)
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        reasoningEnabled: false,
+        reasoningEffort: 'high',
       }),
     }))
   })

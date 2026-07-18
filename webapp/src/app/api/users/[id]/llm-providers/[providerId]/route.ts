@@ -103,6 +103,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // Reasoning controls only apply to OpenAI-compatible providers. For any
+    // other type, force the columns back to defaults so a stray body field
+    // can't persist a reasoning level on e.g. an Anthropic provider (parity
+    // with the POST create path).
+    const effectiveType = (updateData.providerType as string) ?? existing.providerType
+    if (effectiveType !== 'openai_compatible') {
+      updateData.reasoningEnabled = false
+      updateData.reasoningEffort = 'high'
+    }
+
     const provider = await prisma.userLlmProvider.update({
       where: { id: providerId },
       data: updateData,

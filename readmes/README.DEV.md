@@ -125,7 +125,7 @@ Configured **per-user** in the webapp UI (`/settings`), not in `.env`.
 | **LM Studio** (local models) | [lmstudio.ai](https://lmstudio.ai) |
 | **OpenAI-Compatible** (any endpoint) | Supports any server implementing the OpenAI API format |
 
-Ollama providers expose an optional reasoning control in **Global Settings → LLM Providers**. The webapp persists the enabled state and selected `low`, `medium`, `high`, or `max` effort per provider. The agent forwards the value as `reasoning_effort` through the OpenAI-compatible chat-completions API; disabled recognized Ollama endpoints receive `none`. `max` is available for models that support it, while models with binary thinking may treat effort levels identically or ignore unsupported values.
+OpenAI-compatible (Ollama) providers expose an optional reasoning control in **Global Settings → LLM Providers**. The webapp persists the enabled state and selected `low`, `medium`, `high`, or `max` effort per provider. When enabled, the agent forwards the value as `reasoning_effort` through the OpenAI-compatible chat-completions API; when disabled it sends nothing, preserving the model's default. `max` is available for models that support it, while models with binary thinking may treat effort levels identically. Enabling reasoning on a model without the thinking capability makes the endpoint reject the request with a 400 (`"<model>" does not support thinking`); `retry_llm_call` self-heals this by dropping `reasoning_effort` and retrying once, so a misconfigured provider degrades gracefully instead of failing every call.
 
 ### Infrastructure
 
