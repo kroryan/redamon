@@ -45,7 +45,7 @@ Cloud providers in scope:      {ssrf_cloud_providers}
 
 **Hard rules:**
 - ALWAYS run Step 1 (graph-driven surface inventory) BEFORE firing payloads. Blind spraying is noisy and gets WAFed.
-- ALWAYS establish an OAST oracle (Step 2) before claiming a finding. Timeout alone is NEVER sufficient evidence.
+- FIRST classify the sink as full-response or blind. Submit one benign EXTERNAL URL whose body you already know and check whether that body is returned in the HTTP response. If it comes back, this is a FULL-RESPONSE (reflected) SSRF: you read every internal resource's body INLINE from the response, and you need NO OAST oracle, NO callback listener, and NO attacker-controlled infrastructure (never ask for or pause on LHOST/LPORT/webhook/"configure a callback" — that is only for out-of-band exfiltration you do not need here). Only if the fetched body never returns (blind SSRF) do you fall back to the OAST oracle (Step 2); for the blind case, timeout alone is NEVER sufficient evidence.
 - NEVER claim "internal access" from a single timing differential. Confirm with content match, status code variation, OR OAST callback.
 - When the target shows uniform 4xx across all internal IP variants AND all schemes, the sink is LIKELY hardened — but a front WAF, a wrong parameter name, or auth-gating on the fetch endpoint give the same signature, so first confirm a VALID external URL actually fetches. Only once the sink genuinely validates every axis, pivot to a different sink rather than chaining bypasses.
 - If `Cloud metadata pivots: False`, do NOT probe 169.254.169.254, metadata.google.internal, or equivalent. The engagement RoE forbids it.
@@ -101,6 +101,9 @@ If the callback fires, you have a confirmed-egress oracle. If it does not fire, 
 ### Step 3: Internal address probing
 
 For each confirmed-fetching sink, probe internal addresses via three classes (skip cloud-metadata addresses if `Cloud metadata pivots: False`):
+
+**Highest-value internal target — endpoints that reject YOU but trust the server itself.**
+Any path that returns 401/403 (or a redirect/blank) when you request it directly, with any hint of an origin/IP/host restriction (a path named or themed admin, internal, private, management, console, debug, or an explicit localhost-/loopback-only style block), is a PRIME SSRF objective: the app authorizes requests that originate from itself. Re-request that exact path THROUGH the sink's loopback address so the fetch originates server-side — try `http://127.0.0.1/<path>`, `http://localhost/<path>`, and `http://127.0.0.1:<app-port>/<path>` (mirror whatever internal port the app actually listens on, not just 80). Enumerate candidate restricted paths through the loopback fetch: every 401/403/redirecting path you saw during recon, plus common admin/internal endpoint names. On a full-response sink the gated content returns inline in the same response. Do NOT declare SSRF unproductive until every directly-forbidden path has been re-requested through the loopback origin.
 
 **Loopback variants:**
 ```
@@ -179,7 +182,7 @@ Several of these firing together is a strong signal the sink is well-hardened �
 
 For each finding, score with this scale:
 
-- **High** - Live OAST callback received, OR cloud metadata content retrieved, OR internal service banner returned in response body
+- **High** - Live OAST callback received, OR cloud metadata content retrieved, OR internal service banner returned in response body, OR the body of an endpoint that is access-controlled to the loopback/server origin (one that returns 401/403 when you request it directly) returned inline via the loopback fetch
 - **Medium** - Response-time differential consistent across runs, OR status-code differential between internal/external targets, OR partial OOB (DNS hit but no HTTP)
 - **Low** - Single-run timing hint, error message disclosure only, or inconsistent indicators
 
