@@ -203,10 +203,9 @@ describe('Full Pipeline - Active Only preset', () => {
     expect(modules).toHaveLength(6)
   })
 
-  // --- Stealth / anonymity explicitly OFF ---
-  test('disables stealth mode and Tor', () => {
+  // --- Stealth explicitly OFF ---
+  test('disables stealth mode', () => {
     expect(FULL_ACTIVE_SCAN.parameters.stealthMode).toBe(false)
-    expect(FULL_ACTIVE_SCAN.parameters.useTorForRecon).toBe(false)
   })
 
   // --- All 3 port scanners enabled ---
@@ -1924,9 +1923,8 @@ describe('Stealth Recon preset', () => {
     expect(preset!.id).toBe('stealth-recon')
   })
 
-  test('enables stealth mode and Tor routing', () => {
+  test('enables stealth mode', () => {
     expect(STEALTH_RECON.parameters.stealthMode).toBe(true)
-    expect(STEALTH_RECON.parameters.useTorForRecon).toBe(true)
   })
 
   test('enables Naabu in passive mode', () => {
@@ -2425,10 +2423,6 @@ describe('Red Team Operator preset', () => {
     const preset = getPresetById('red-team-operator')
     expect(preset).toBeDefined()
     expect(preset!.id).toBe('red-team-operator')
-  })
-
-  test('routes all traffic through Tor', () => {
-    expect(RED_TEAM_OPERATOR.parameters.useTorForRecon).toBe(true)
   })
 
   test('Naabu uses connect scan (not passive, not SYN)', () => {

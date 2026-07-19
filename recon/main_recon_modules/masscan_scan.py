@@ -358,7 +358,6 @@ def run_masscan_scan(recon_data: dict, output_file: Path = None, settings: dict 
             ("MASSCAN_RETRIES", "Performance"),
             ("MASSCAN_BANNERS", "Features"),
             ("MASSCAN_EXCLUDE_TARGETS", "Features"),
-            ("USE_TOR_FOR_RECON", "Anonymity"),
         ],
     )
 
@@ -366,12 +365,6 @@ def run_masscan_scan(recon_data: dict, output_file: Path = None, settings: dict 
     MASSCAN_CUSTOM_PORTS = settings.get('MASSCAN_CUSTOM_PORTS', '')
     MASSCAN_TOP_PORTS = settings.get('MASSCAN_TOP_PORTS', '1000')
     MASSCAN_BANNERS = settings.get('MASSCAN_BANNERS', False)
-    USE_TOR = settings.get('USE_TOR_FOR_RECON', False)
-
-    # Masscan uses raw SYN packets — incompatible with Tor proxy
-    if USE_TOR:
-        print("[!][Masscan] Cannot use Tor proxy (raw SYN packets bypass TCP stack) — skipping")
-        return recon_data
 
     if not is_masscan_installed():
         print("[!][Masscan] Binary not found. Ensure masscan is installed.")

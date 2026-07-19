@@ -48,7 +48,6 @@ def test_hakrawler_run_builds_correct_docker_command():
             allowed_hosts={"example.com"},
             custom_headers=["Cookie: test=1", "Auth: Bearer xyz"],
             exclude_patterns=[],
-            use_proxy=False,
         )
 
     cmd = captured_cmd['cmd']
@@ -64,40 +63,6 @@ def test_hakrawler_run_builds_correct_docker_command():
     header_idx = cmd.index("-h") + 1
     assert "Cookie: test=1;;Auth: Bearer xyz" == cmd[header_idx]
     print("PASS: test_hakrawler_run_builds_correct_docker_command")
-
-
-def test_hakrawler_run_with_proxy():
-    """Verify proxy flags are added when use_proxy=True."""
-    from recon.helpers.resource_enum.hakrawler_helpers import run_hakrawler_crawler
-
-    captured_cmd = {}
-
-    def fake_popen(cmd, **kwargs):
-        captured_cmd['cmd'] = cmd
-        proc = mock.MagicMock()
-        proc.stdin = mock.MagicMock()
-        proc.stdout.readline.return_value = ""
-        proc.poll.return_value = 0
-        proc.wait.return_value = 0
-        return proc
-
-    with mock.patch("subprocess.Popen", side_effect=fake_popen):
-        run_hakrawler_crawler(
-            target_urls=["https://example.com"],
-            docker_image="jauderho/hakrawler:latest",
-            depth=2, threads=5, timeout=30, max_urls=500,
-            include_subs=False, insecure=False,
-            allowed_hosts={"example.com"},
-            custom_headers=[], exclude_patterns=[],
-            use_proxy=True,
-        )
-
-    cmd = captured_cmd['cmd']
-    assert "--network" in cmd and "host" in cmd
-    assert "-proxy" in cmd
-    proxy_idx = cmd.index("-proxy") + 1
-    assert "socks5://127.0.0.1:9050" == cmd[proxy_idx]
-    print("PASS: test_hakrawler_run_with_proxy")
 
 
 def test_hakrawler_run_filters_out_of_scope():

@@ -43,7 +43,6 @@ Bug bounty hunters and red teamers who want to maximize credential and secret di
 
     // Stealth
     stealthMode: false,
-    useTorForRecon: false,
 
     // WHOIS & DNS
     whoisEnabled: true,

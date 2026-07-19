@@ -53,7 +53,6 @@ Network security teams and pentesters who need to map large external perimeters 
     scanModules: ['domain_discovery', 'port_scan', 'http_probe', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools enabled (reverse DNS useful in IP mode) ---
     subdomainDiscoveryEnabled: true,

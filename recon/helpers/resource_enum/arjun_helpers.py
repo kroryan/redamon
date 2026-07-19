@@ -43,7 +43,6 @@ def _run_arjun_single_method(
     disable_redirects: bool,
     custom_headers: List[str],
     allowed_hosts: Set[str],
-    use_proxy: bool = False,
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Run Arjun for a single HTTP method. Called in parallel by run_arjun_discovery().
@@ -89,9 +88,6 @@ def _run_arjun_single_method(
         print(f"[*][Arjun/{method}] Scanning {len(target_urls)} URLs...")
 
         env = os.environ.copy()
-        if use_proxy:
-            env['HTTP_PROXY'] = 'socks5://127.0.0.1:9050'
-            env['HTTPS_PROXY'] = 'socks5://127.0.0.1:9050'
 
         timed_out = False
         proc = subprocess.Popen(
@@ -242,7 +238,6 @@ def run_arjun_discovery(
     disable_redirects: bool,
     custom_headers: List[str],
     allowed_hosts: Set[str],
-    use_proxy: bool = False,
 ) -> Tuple[List[Dict], Dict]:
     """
     Run Arjun parameter discovery against target URLs with multiple methods in parallel.
@@ -263,7 +258,6 @@ def run_arjun_discovery(
         disable_redirects: Do not follow HTTP redirects
         custom_headers: Custom HTTP headers to include
         allowed_hosts: Set of in-scope hostnames
-        use_proxy: Use Tor SOCKS proxy
 
     Returns:
         Tuple of (results_list, metadata_dict)
@@ -279,8 +273,6 @@ def run_arjun_discovery(
     print(f"[*][Arjun] Methods: {', '.join(methods)} ({'parallel' if len(methods) > 1 else 'single'})")
     if passive:
         print("[*][Arjun] Mode: PASSIVE (CommonCrawl/OTX/WaybackMachine only)")
-    if use_proxy:
-        print("[*][Arjun] Using Tor SOCKS proxy via environment variables")
 
     all_results = []
     all_external_domains = []
@@ -290,7 +282,7 @@ def run_arjun_discovery(
         results, ext = _run_arjun_single_method(
             target_urls, methods[0], threads, timeout, scan_timeout,
             chunk_size, rate_limit, stable, passive, disable_redirects,
-            custom_headers, allowed_hosts, use_proxy,
+            custom_headers, allowed_hosts,
         )
         all_results.extend(results)
         all_external_domains.extend(ext)
@@ -303,7 +295,7 @@ def run_arjun_discovery(
                     _run_arjun_single_method,
                     target_urls, method, threads, timeout, scan_timeout,
                     chunk_size, rate_limit, stable, passive, disable_redirects,
-                    custom_headers, allowed_hosts, use_proxy,
+                    custom_headers, allowed_hosts,
                 )
 
             for method, future in futures.items():

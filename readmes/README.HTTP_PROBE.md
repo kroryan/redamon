@@ -74,7 +74,6 @@ The `httpx_scan.py` module integrates ProjectDiscovery's httpx toolkit into RedA
 | **Favicon Hashing** | Fingerprint via favicon hash |
 | **Banner Grabbing** | Service detection for non-HTTP ports (SSH, FTP, SMTP, etc.) |
 | **Docker Execution** | No local installation required |
-| **Tor Support** | Anonymous probing via SOCKS proxy |
 
 ---
 
@@ -134,7 +133,7 @@ All parameters are configured via the webapp project settings (stored in Postgre
 **Timeout Considerations:**
 - `5s` - Fast networks, modern servers
 - `10s` - **Default** - handles most scenarios
-- `15-30s` - Slow servers, high latency networks, Tor usage
+- `15-30s` - Slow servers, high latency networks
 
 ---
 
@@ -816,7 +815,6 @@ Wappalyzer-detected technologies are automatically included in CVE lookup:
 1. INITIALIZATION
    └── Check Docker availability
    └── Pull httpx image if needed
-   └── Check Tor availability (if enabled)
 
 2. TARGET BUILDING
    └── Priority 1: Build URLs from Naabu port data
@@ -1066,7 +1064,6 @@ HTTPX_INCLUDE_RESPONSE_HEADERS = True
 HTTPX_THREADS = 10
 HTTPX_RATE_LIMIT = 20
 HTTPX_TIMEOUT = 20
-USE_TOR_FOR_RECON = True
 HTTPX_CUSTOM_HEADERS = [
     "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 ]
@@ -1163,7 +1160,7 @@ docker run --rm \
 |------|------------|
 | Rate limiting/bans | Reduce `HTTPX_RATE_LIMIT` |
 | WAF blocking | Use custom User-Agent, reduce rate |
-| Detection | Use Tor, reduce threads |
+| Detection | Reduce threads |
 | Fingerprinting | Your requests are identifiable |
 
 ### Safe Defaults

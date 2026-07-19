@@ -46,7 +46,6 @@ Pentesters and bug bounty hunters focused on injection vulnerabilities. Ideal fo
     scanModules: ['domain_discovery', 'http_probe', 'resource_enum', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools, default limits ---
     subdomainDiscoveryEnabled: true,

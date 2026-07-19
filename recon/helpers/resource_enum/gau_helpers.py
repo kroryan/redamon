@@ -117,7 +117,6 @@ def run_gau_for_domain(
     max_urls: int,
     year_range: Optional[List[str]] = None,
     verbose: bool = False,
-    use_proxy: bool = False,
     urlscan_api_key: str = ""
 ) -> List[str]:
     """
@@ -133,7 +132,6 @@ def run_gau_for_domain(
         max_urls: Maximum URLs to return
         year_range: Optional [from_year, to_year] filter
         verbose: Enable verbose output
-        use_proxy: Whether to use Tor proxy
         urlscan_api_key: Optional URLScan API key for higher rate limits
 
     Returns:
@@ -149,7 +147,7 @@ def run_gau_for_domain(
         return _run_gau_docker(
             domain, docker_image, providers, threads, timeout,
             blacklist_extensions, max_urls, year_range, verbose,
-            use_proxy, config_temp_dir,
+            config_temp_dir,
         )
     finally:
         if config_temp_dir:
@@ -166,7 +164,6 @@ def _run_gau_docker(
     max_urls: int,
     year_range: Optional[List[str]],
     verbose: bool,
-    use_proxy: bool,
     config_temp_dir: Optional[Path],
 ) -> List[str]:
     """Internal: execute GAU Docker container."""
@@ -175,9 +172,8 @@ def _run_gau_docker(
     # Build GAU command.
     # --net=host is ALWAYS passed for consistency with the rest of the recon
     # pipeline. GAU queries third-party APIs (Wayback/OTX/CommonCrawl) which
-    # work over either bridge or host networking, BUT when use_proxy is on we
-    # also need to reach the Tor SOCKS proxy at 127.0.0.1:9050 — only host
-    # networking can route there. See recon/helpers/resource_enum/katana_helpers.py.
+    # work over either bridge or host networking.
+    # See recon/helpers/resource_enum/katana_helpers.py.
     cmd = ["docker", "run", "--rm", "--net=host"]
     if _is_arm64_host():
         cmd.extend(["--platform", "linux/amd64"])
@@ -186,13 +182,6 @@ def _run_gau_docker(
     if config_temp_dir:
         config_file = config_temp_dir / ".gau.toml"
         cmd.extend(["-v", f"{config_file}:/root/.gau.toml:ro"])
-
-    # Tor proxy env (network already host-mode above)
-    if use_proxy:
-        cmd.extend([
-            "-e", "HTTP_PROXY=socks5://127.0.0.1:9050",
-            "-e", "HTTPS_PROXY=socks5://127.0.0.1:9050"
-        ])
 
     cmd.extend([
         docker_image,
@@ -255,7 +244,6 @@ def run_gau_discovery(
     max_urls: int,
     year_range: Optional[List[str]] = None,
     verbose: bool = False,
-    use_proxy: bool = False,
     urlscan_api_key: str = "",
     workers: int = 10
 ) -> Tuple[List[str], Dict[str, List[str]]]:
@@ -265,7 +253,6 @@ def run_gau_discovery(
     Args:
         target_domains: Set of domains to query
         ... (configuration parameters)
-        use_proxy: Whether to use Tor proxy
         urlscan_api_key: Optional URLScan API key for higher rate limits
 
     Returns:
@@ -298,7 +285,6 @@ def run_gau_discovery(
                 max_urls=max_urls,
                 year_range=year_range,
                 verbose=verbose,
-                use_proxy=use_proxy,
                 urlscan_api_key=urlscan_api_key
             )
             future_to_domain[future] = domain
@@ -367,8 +353,7 @@ def verify_gau_urls(
     threads: int,
     timeout: int,
     rate_limit: int,
-    accept_status: List[int],
-    use_proxy: bool = False
+    accept_status: List[int]
 ) -> Set[str]:
     """
     Verify GAU-discovered URLs are live using httpx.
@@ -380,7 +365,6 @@ def verify_gau_urls(
         timeout: Request timeout
         rate_limit: Rate limit
         accept_status: List of acceptable status codes
-        use_proxy: Whether to use Tor proxy
 
     Returns:
         Set of verified live URLs
@@ -419,9 +403,6 @@ def verify_gau_urls(
             "-rl", str(rate_limit),
         ]
 
-        if use_proxy:
-            cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
-
         try:
             subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         except subprocess.TimeoutExpired:
@@ -459,8 +440,7 @@ def detect_gau_methods(
     threads: int,
     timeout: int,
     rate_limit: int,
-    filter_dead: bool = True,
-    use_proxy: bool = False
+    filter_dead: bool = True
 ) -> Dict[str, List[str]]:
     """
     Detect allowed HTTP methods for GAU URLs using OPTIONS probe.
@@ -472,7 +452,6 @@ def detect_gau_methods(
         timeout: Request timeout
         rate_limit: Rate limit
         filter_dead: Whether to filter out dead endpoints
-        use_proxy: Whether to use Tor proxy
 
     Returns:
         Dict mapping URL -> list of allowed methods
@@ -511,9 +490,6 @@ def detect_gau_methods(
             "-timeout", str(timeout),
             "-rl", str(rate_limit),
         ]
-
-        if use_proxy:
-            cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
         try:
             subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -590,9 +566,6 @@ def detect_gau_methods(
                 "-timeout", str(timeout),
                 "-rl", str(rate_limit),
             ]
-
-            if use_proxy:
-                get_cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
             try:
                 subprocess.run(get_cmd, capture_output=True, text=True, timeout=300)

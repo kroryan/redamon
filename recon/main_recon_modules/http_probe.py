@@ -225,18 +225,6 @@ def pull_httpx_docker_image(docker_image: str) -> bool:
         return False
 
 
-def is_tor_running() -> bool:
-    """Check if Tor SOCKS proxy is available."""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex(('127.0.0.1', 9050))
-        sock.close()
-        return result == 0
-    except Exception:
-        return False
-
-
 # =============================================================================
 # Banner Grabbing for Non-HTTP Services
 # =============================================================================
@@ -796,7 +784,7 @@ def get_host_path(container_path: str) -> str:
     return container_path
 
 
-def build_httpx_command(targets_file: str, output_file: str, settings: dict, use_proxy: bool = False) -> List[str]:
+def build_httpx_command(targets_file: str, output_file: str, settings: dict) -> List[str]:
     """
     Build the Docker command for running httpx.
 
@@ -804,7 +792,6 @@ def build_httpx_command(targets_file: str, output_file: str, settings: dict, use
         targets_file: Path to file containing URLs (one per line)
         output_file: Path for JSON output
         settings: Settings dictionary from main.py
-        use_proxy: Whether to use Tor proxy
 
     Returns:
         List of command arguments
@@ -959,10 +946,6 @@ def build_httpx_command(targets_file: str, output_file: str, settings: dict, use
         cmd.extend(["-mc", ",".join(HTTPX_MATCH_CODES)])
     if HTTPX_FILTER_CODES:
         cmd.extend(["-fc", ",".join(HTTPX_FILTER_CODES)])
-
-    # Proxy support
-    if use_proxy:
-        cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
     return cmd
 
@@ -1715,7 +1698,6 @@ def run_http_probe(recon_data: dict, output_file: Path = None, settings: dict = 
             ("HTTPX_CUSTOM_HEADERS", "Advanced"),
             ("HTTPX_MATCH_CODES", "Advanced"),
             ("HTTPX_FILTER_CODES", "Advanced"),
-            ("USE_TOR_FOR_RECON", "Anonymity"),
             ("WAPPALYZER_ENABLED", "Wappalyzer enrichment"),
             ("WAPPALYZER_MIN_CONFIDENCE", "Wappalyzer enrichment"),
             ("WAPPALYZER_REQUIRE_HTML", "Wappalyzer enrichment"),
@@ -1738,7 +1720,6 @@ def run_http_probe(recon_data: dict, output_file: Path = None, settings: dict = 
     HTTPX_PROBE_TECH_DETECT = settings.get('HTTPX_PROBE_TECH_DETECT', True)
     HTTPX_PROBE_TLS_INFO = settings.get('HTTPX_PROBE_TLS_INFO', True)
     HTTPX_INCLUDE_RESPONSE = settings.get('HTTPX_INCLUDE_RESPONSE', True)
-    USE_TOR_FOR_RECON = settings.get('USE_TOR_FOR_RECON', False)
     BANNER_GRAB_ENABLED = settings.get('BANNER_GRAB_ENABLED', True)
 
     # Check Docker
@@ -1754,15 +1735,6 @@ def run_http_probe(recon_data: dict, output_file: Path = None, settings: dict = 
     if not pull_httpx_docker_image(HTTPX_DOCKER_IMAGE):
         print("[!][httpx] Failed to get httpx Docker image")
         return recon_data
-
-    # Check Tor if enabled
-    use_proxy = False
-    if USE_TOR_FOR_RECON:
-        if is_tor_running():
-            print("[✓][httpx] Tor proxy detected - enabling anonymous probing")
-            use_proxy = True
-        else:
-            print("[!][httpx] Tor not running - probing without proxy")
 
     # Build target URLs
     print("\n[*][httpx] Building target URLs...")
@@ -1808,7 +1780,7 @@ def run_http_probe(recon_data: dict, output_file: Path = None, settings: dict = 
         httpx_output = scan_temp_dir / "httpx_output.json"
 
         # Build and run command
-        cmd = build_httpx_command(str(targets_file), str(httpx_output), settings, use_proxy)
+        cmd = build_httpx_command(str(targets_file), str(httpx_output), settings)
 
         print(f"\n[*][httpx] Starting httpx probe...")
         print(f"[*][httpx] URLs to probe: {len(urls)}")
@@ -1894,7 +1866,7 @@ def run_http_probe(recon_data: dict, output_file: Path = None, settings: dict = 
                 "tech_detection": HTTPX_PROBE_TECH_DETECT,
                 "tls_probing": HTTPX_PROBE_TLS_INFO,
                 "response_included": HTTPX_INCLUDE_RESPONSE,
-                "proxy_used": use_proxy,
+                "proxy_used": False,
                 "total_urls_probed": len(urls),
                 "root_domain_filter": root_domain,
                 "filtered_mode": filtered_mode,

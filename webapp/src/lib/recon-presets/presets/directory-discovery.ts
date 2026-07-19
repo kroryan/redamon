@@ -44,7 +44,6 @@ Pentesters and bug bounty hunters in the early recon phase who want a complete m
     scanModules: ['domain_discovery', 'http_probe', 'resource_enum'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools, default limits ---
     subdomainDiscoveryEnabled: true,

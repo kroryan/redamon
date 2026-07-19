@@ -63,7 +63,6 @@ Use \`API Security Audit\` if you also need heavy REST endpoint discovery via Ki
     scanModules: ['domain_discovery', 'port_scan', 'http_probe', 'resource_enum', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: passive tools only (crt.sh, Subfinder, Amass passive,
     //     HackerTarget already catch api.*, graphql.*, gql.* patterns). Knockpy

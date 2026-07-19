@@ -356,7 +356,6 @@ describe('reconPresetSchema with realistic LLM output', () => {
     const llmOutput = {
       scanModules: ['domain_discovery', 'http_probe'],
       stealthMode: true,
-      useTorForRecon: false,
       subdomainDiscoveryEnabled: true,
       crtshEnabled: true,
       hackerTargetEnabled: true,

@@ -124,7 +124,7 @@ class TestRunSubdomainDiscovery(unittest.TestCase):
         """Helper that sets up all mocks and runs run_subdomain_discovery."""
         # Mock get_settings
         mock_settings = MagicMock()
-        mock_settings.return_value = {"USE_TOR_FOR_RECON": False, "USE_BRUTEFORCE_FOR_SUBDOMAINS": False,
+        mock_settings.return_value = {"USE_BRUTEFORCE_FOR_SUBDOMAINS": False,
     "SUBDOMAIN_LIST": ["."],}
 
         # Mock domain_recon functions
@@ -2363,7 +2363,6 @@ class TestRunKatana(unittest.TestCase):
             "KATANA_RATE_LIMIT": 50, "KATANA_TIMEOUT": 3600,
             "KATANA_JS_CRAWL": True, "KATANA_PARAMS_ONLY": False,
             "KATANA_CUSTOM_HEADERS": [], "KATANA_EXCLUDE_PATTERNS": [],
-            "TOR_ENABLED": False,
             "SUBDOMAIN_LIST": ["."],}
 
         mock_katana_crawler = MagicMock(return_value=(
@@ -2595,7 +2594,6 @@ class TestRunHakrawler(unittest.TestCase):
             "HAKRAWLER_INCLUDE_SUBS": False,
             "HAKRAWLER_INSECURE": True,
             "HAKRAWLER_CUSTOM_HEADERS": [],
-            "TOR_ENABLED": False,
             "SUBDOMAIN_LIST": ["."],}
 
         mock_hakrawler_crawler = MagicMock(return_value=(
@@ -2847,7 +2845,7 @@ class TestRunHakrawler(unittest.TestCase):
         mocks = self._run_with_mocks({"domain": "example.com", "user_inputs": []})
         call_args = mocks["hakrawler_crawler"].call_args
         # Positional: target_urls, docker_image, depth, threads, timeout, max_urls,
-        #             include_subs, insecure, allowed_hosts, custom_headers, exclude_patterns, use_proxy
+        #             include_subs, insecure, allowed_hosts, custom_headers, exclude_patterns
         self.assertEqual(call_args[0][1], "jauderho/hakrawler:latest")  # docker_image
         self.assertEqual(call_args[0][2], 2)   # depth
         self.assertEqual(call_args[0][3], 5)   # threads
@@ -2895,7 +2893,6 @@ class TestRunZapAjaxSpider(unittest.TestCase):
             "ZAP_AJAX_SPIDER_EXCLUDE_PATTERNS": [],
             "ZAP_AJAX_SPIDER_MAX_URLS": 1000,
             "ZAP_AJAX_SPIDER_PARALLELISM": 1,
-            "TOR_ENABLED": False,
             "SUBDOMAIN_LIST": ["."],
         }
 
@@ -3345,7 +3342,6 @@ class TestRunJsluice(unittest.TestCase):
             "JSLUICE_ENABLED": True, "JSLUICE_MAX_FILES": 100,
             "JSLUICE_TIMEOUT": 300, "JSLUICE_EXTRACT_URLS": True,
             "JSLUICE_EXTRACT_SECRETS": True, "JSLUICE_CONCURRENCY": 5,
-            "TOR_ENABLED": False,
             "SUBDOMAIN_LIST": ["."],}
 
         mock_jsluice_analysis = MagicMock(return_value={
@@ -4994,7 +4990,7 @@ class TestRunNuclei(unittest.TestCase):
             'NUCLEI_SYSTEM_RESOLVERS': True, 'NUCLEI_FOLLOW_REDIRECTS': True,
             'NUCLEI_MAX_REDIRECTS': 10, 'NUCLEI_SCAN_ALL_IPS': False,
             'NUCLEI_INTERACTSH': True, 'NUCLEI_DOCKER_IMAGE': 'projectdiscovery/nuclei:latest',
-            'USE_TOR_FOR_RECON': False, 'KATANA_DEPTH': 2,
+            'KATANA_DEPTH': 2,
             'CVE_LOOKUP_ENABLED': False, 'SECURITY_CHECK_ENABLED': False,
             'MITRE_ENABLED': False,
             "SUBDOMAIN_LIST": ["."],}

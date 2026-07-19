@@ -110,10 +110,6 @@ class TestGraphqlCopCLIAcceptance(unittest.TestCase):
         r = self._run('-d')
         self._assert_not_arg_error(r)
 
-    def test_x_proxy(self):
-        r = self._run('-x', 'http://127.0.0.1:1')
-        self._assert_not_arg_error(r)
-
     def test_v_version(self):
         # -v prints version and exits 0
         cmd = ['docker', 'run', '--rm', self.IMAGE, '-v']
@@ -127,18 +123,12 @@ class TestGraphqlCopCLIAcceptance(unittest.TestCase):
         self.assertIn('no such option', combined.lower(),
                       "If -e is accepted, our Python-side filter is no longer needed")
 
-    def test_T_tor_flag_accepted(self):
-        # -T tries to connect to Tor on 127.0.0.1:9050. It errors but doesn't reject the flag.
-        r = self._run('-T', timeout=30)
-        self._assert_not_arg_error(r)
-
     def test_all_our_flags_together(self):
         """Kitchen sink: every flag our wrapper ever passes, combined."""
         r = self._run(
             '-f', '-d',
             '-H', json.dumps({'Authorization': 'Bearer X'}),
             '-H', json.dumps({'X-Custom': 'Y'}),
-            '-x', 'http://proxy:8080',
         )
         self._assert_not_arg_error(r)
 
@@ -660,20 +650,13 @@ class TestSubprocessCmdConstruction(unittest.TestCase):
             'GRAPHQL_COP_ENABLED': True, 'GRAPHQL_COP_DEBUG': True})
         self.assertIn('-d', cmd)
 
-    def test_tor_mode_uses_net_host_plus_T(self):
+    def test_net_host_unconditional(self):
         # Host networking is now unconditional (single `--net=host` flag) so
         # the spawned container can reach loopback / local-lab GraphQL
-        # endpoints. Tor still drives the in-process `-T` flag.
+        # endpoints.
         cmd = self._capture_cmd({
-            'GRAPHQL_COP_ENABLED': True, 'USE_TOR_FOR_RECON': True})
+            'GRAPHQL_COP_ENABLED': True})
         self.assertIn('--net=host', cmd)
-        self.assertIn('-T', cmd)
-
-    def test_http_proxy_flag(self):
-        cmd = self._capture_cmd({
-            'GRAPHQL_COP_ENABLED': True, 'HTTP_PROXY': 'http://127.0.0.1:8080'})
-        x_idx = cmd.index('-x')
-        self.assertEqual(cmd[x_idx + 1], 'http://127.0.0.1:8080')
 
     def test_auth_headers_one_H_per_header(self):
         cmd = self._capture_cmd(

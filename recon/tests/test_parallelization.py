@@ -27,7 +27,7 @@ def test_crtsh_creates_own_session():
     """query_crtsh creates its own session and closes it — no shared state."""
     from recon.main_recon_modules.domain_recon import query_crtsh
 
-    with mock.patch("recon.main_recon_modules.domain_recon.get_tor_session") as mock_session_factory:
+    with mock.patch("recon.main_recon_modules.domain_recon.requests.Session") as mock_session_factory:
         mock_session = mock.MagicMock()
         mock_resp = mock.MagicMock()
         mock_resp.status_code = 200
@@ -38,10 +38,10 @@ def test_crtsh_creates_own_session():
         mock_session.get.return_value = mock_resp
         mock_session_factory.return_value = mock_session
 
-        result = query_crtsh("example.com", anonymous=False, settings={})
+        result = query_crtsh("example.com", settings={})
 
         # Should have created its own session
-        mock_session_factory.assert_called_once_with(False)
+        mock_session_factory.assert_called_once_with()
         # Should have closed the session
         mock_session.close.assert_called_once()
         # Should return sourced dict
@@ -54,7 +54,7 @@ def test_hackertarget_creates_own_session():
     """query_hackertarget creates its own session and closes it."""
     from recon.main_recon_modules.domain_recon import query_hackertarget
 
-    with mock.patch("recon.main_recon_modules.domain_recon.get_tor_session") as mock_session_factory:
+    with mock.patch("recon.main_recon_modules.domain_recon.requests.Session") as mock_session_factory:
         mock_session = mock.MagicMock()
         mock_resp = mock.MagicMock()
         mock_resp.status_code = 200
@@ -62,9 +62,9 @@ def test_hackertarget_creates_own_session():
         mock_session.get.return_value = mock_resp
         mock_session_factory.return_value = mock_session
 
-        result = query_hackertarget("example.com", anonymous=False, settings={})
+        result = query_hackertarget("example.com", settings={})
 
-        mock_session_factory.assert_called_once_with(False)
+        mock_session_factory.assert_called_once_with()
         mock_session.close.assert_called_once()
         assert "mail.example.com" in result
         assert "hackertarget" in result["mail.example.com"]
@@ -81,7 +81,7 @@ def test_parallel_crtsh_hackertarget():
     call_log = {"sessions_created": 0}
     lock = threading.Lock()
 
-    def fake_session_factory(anonymous):
+    def fake_session_factory():
         with lock:
             call_log["sessions_created"] += 1
         sess = mock.MagicMock()
@@ -92,10 +92,10 @@ def test_parallel_crtsh_hackertarget():
         sess.get.return_value = resp
         return sess
 
-    with mock.patch("recon.main_recon_modules.domain_recon.get_tor_session", side_effect=fake_session_factory):
+    with mock.patch("recon.main_recon_modules.domain_recon.requests.Session", side_effect=fake_session_factory):
         with ThreadPoolExecutor(max_workers=2) as executor:
-            f1 = executor.submit(query_crtsh, "example.com", False, {})
-            f2 = executor.submit(query_hackertarget, "example.com", False, {})
+            f1 = executor.submit(query_crtsh, "example.com", {})
+            f2 = executor.submit(query_hackertarget, "example.com", {})
 
             r1 = f1.result()
             r2 = f2.result()
@@ -136,7 +136,7 @@ def test_discover_subdomains_parallel():
         }
 
         result = discover_subdomains(
-            "example.com", anonymous=False, bruteforce=False,
+            "example.com", bruteforce=False,
             resolve=True, save_output=False, settings={"AMASS_ENABLED": False}
         )
 

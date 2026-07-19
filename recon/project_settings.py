@@ -35,7 +35,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Scan Modules
     'SCAN_MODULES': ['domain_discovery', 'port_scan', 'http_probe', 'resource_enum', 'vuln_scan'],
     'UPDATE_GRAPH_DB': True,
-    'USE_TOR_FOR_RECON': False,
     'USE_BRUTEFORCE_FOR_SUBDOMAINS': False,
     'STEALTH_MODE': False,
 
@@ -866,7 +865,6 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     # Scan Modules
     settings['SCAN_MODULES'] = project.get('scanModules', DEFAULT_SETTINGS['SCAN_MODULES'])
     settings['UPDATE_GRAPH_DB'] = project.get('updateGraphDb', DEFAULT_SETTINGS['UPDATE_GRAPH_DB'])
-    settings['USE_TOR_FOR_RECON'] = project.get('useTorForRecon', DEFAULT_SETTINGS['USE_TOR_FOR_RECON'])
     settings['USE_BRUTEFORCE_FOR_SUBDOMAINS'] = project.get('useBruteforceForSubdomains', DEFAULT_SETTINGS['USE_BRUTEFORCE_FOR_SUBDOMAINS'])
     settings['STEALTH_MODE'] = project.get('stealthMode', DEFAULT_SETTINGS['STEALTH_MODE'])
 

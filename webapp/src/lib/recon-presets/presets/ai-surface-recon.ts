@@ -23,13 +23,12 @@ Red-teamers and AI-security engineers scoping the adversarial-AI attack surface 
 - **AI Surface Recon (active), every workload on:** chat-shape probes, MCP handshake, MCP tools/list enumeration, MCP tool-poisoning YARA scan, OpenAPI/ai-plugin discovery, model-family guess, vector-DB confirmation read, Julius fingerprint pack, latency baseline, and response caching, with a generous per-probe timeout and concurrency
 
 ### What it disables
-- Stealth mode / Tor (would turn off MCP tools/list and the vector-DB read and throttle probing, defeating the purpose)
+- Stealth mode (would turn off MCP tools/list and the vector-DB read and throttle probing, defeating the purpose)
 
 ### How it works
 Every AI signal is a property annotation on existing graph nodes (Endpoint, Technology, Parameter, Service) plus Vulnerability nodes for MCP tool poisoning. Run a full scan, then open the graph or the report's AI Surface section to review the discovered AI attack surface. The AI Surface Recon node also supports partial recon, so you can re-probe the AI surfaces after updating the probe packs without re-crawling.`,
   parameters: {
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Discovery ---
     subdomainDiscoveryEnabled: true,

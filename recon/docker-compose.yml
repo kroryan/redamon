@@ -44,9 +44,6 @@ services:
       # - SUBDOMAIN_LIST=
       # - SCAN_MODULES=domain_discovery,port_scan,http_probe,resource_enum,vuln_scan
 
-      # Anonymity settings
-      - USE_TOR_FOR_RECON=${USE_TOR_FOR_RECON:-false}
-
       # Graph DB integration (set to true if Neo4j is running)
       - UPDATE_GRAPH_DB=${UPDATE_GRAPH_DB:-false}
 
@@ -97,18 +94,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-
-  # Optional: Tor service for anonymous scanning
-  # Uncomment to enable Tor support without host Tor installation
-  tor:
-    image: dperson/torproxy:latest
-    container_name: redamon-tor
-    profiles:
-      - tor  # Only starts with: docker-compose --profile tor up
-    ports:
-      - "9050:9050"  # SOCKS proxy
-      - "9051:9051"  # Control port
-    restart: unless-stopped
 
 # Named volumes for data persistence and sharing between containers
 volumes:

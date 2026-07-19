@@ -93,7 +93,6 @@ When `NUCLEI_DAST_MODE = True`, Katana crawler is integrated:
 | **DAST Mode** | Active fuzzing for XSS, SQLi, SSTI, Command Injection |
 | **Auto-Update Templates** | Automatic template updates before each scan |
 | **Category Classification** | Auto-categorizes findings (XSS, SQLi, RCE, etc.) |
-| **Tor Integration** | Anonymous scanning via SOCKS proxy |
 | **Authenticated Crawling** | Custom headers support for login-protected pages |
 | **Incremental Saving** | Results saved progressively |
 | **CVE Lookup** | Technology-based CVE lookup (like Nmap's vulners) |
@@ -496,7 +495,6 @@ docker run --rm \
    └── Pull nuclei image if needed
    └── Ensure templates volume exists
    └── Auto-update templates (if enabled)
-   └── Check Tor availability
 
 2. TARGET EXTRACTION
    └── Parse recon_data JSON
@@ -703,8 +701,7 @@ docker run --rm \
   -as \                      # Automatic scan
   -system-resolvers \
   -follow-redirects \
-  -max-redirects 10 \
-  -proxy socks5://127.0.0.1:9050  # If Tor enabled
+  -max-redirects 10
 ```
 
 ---
@@ -764,16 +761,15 @@ docker run --rm \
 1. Check Docker availability
 2. Pull nuclei image if needed
 3. Ensure templates volume exists (with auto-update if enabled)
-4. Check Tor availability
-5. Extract targets from recon data
-6. Build target URLs (using nmap data if available)
-7. **Run Katana crawler** (if DAST mode enabled)
-8. Create temporary files (base URLs + Katana discovered URLs)
-9. Execute nuclei Docker container with -dast flag
-10. Parse JSONL results
-11. Aggregate and classify findings
-12. Add to recon_data["nuclei"] including discovered_urls
-13. Save incrementally
+4. Extract targets from recon data
+5. Build target URLs (using nmap data if available)
+6. **Run Katana crawler** (if DAST mode enabled)
+7. Create temporary files (base URLs + Katana discovered URLs)
+8. Execute nuclei Docker container with -dast flag
+9. Parse JSONL results
+10. Aggregate and classify findings
+11. Add to recon_data["nuclei"] including discovered_urls
+12. Save incrementally
 
 **Returns:** Enriched `recon_data` with `nuclei` section.
 
@@ -787,13 +783,12 @@ docker run --rm \
 
 ---
 
-### `run_katana_crawler(target_urls: List[str], use_proxy: bool = False) -> List[str]`
+### `run_katana_crawler(target_urls: List[str]) -> List[str]`
 
 **Purpose:** Run Katana web crawler to discover URLs with parameters for DAST fuzzing.
 
 **Args:**
 - `target_urls`: Base URLs to start crawling from
-- `use_proxy`: Whether to use Tor proxy
 
 **Behavior:**
 1. Pulls Katana Docker image
@@ -815,8 +810,7 @@ docker run --rm \
   -fs dn \                  # Scope
   -murl 500 \               # Max URLs
   -jc \                     # JavaScript crawl
-  -H "Cookie: session=..." \ # Custom headers (optional)
-  -proxy socks5://127.0.0.1:9050  # If Tor enabled
+  -H "Cookie: session=..."   # Custom headers (optional)
 ```
 
 **Returns:** List of URLs with parameters (e.g., `["https://example.com/search?q=test"]`)
@@ -1043,7 +1037,6 @@ docker run --rm \
 |------|-------------|
 | `-timeout <s>` | Request timeout in seconds |
 | `-retries <n>` | Number of retries |
-| `-proxy <url>` | HTTP/SOCKS proxy |
 | `-system-resolvers` | Use system DNS |
 | `-follow-redirects` | Follow HTTP redirects |
 | `-max-redirects <n>` | Max redirect depth |
@@ -1407,16 +1400,6 @@ KATANA_CUSTOM_HEADERS = [
 - SSTI in template parameters
 - Path traversal in file parameters
 
-### Anonymous Scanning
-
-```bash
-# Start Tor
-sudo systemctl start tor
-
-# In project settings
-USE_TOR_FOR_RECON = True
-```
-
 ---
 
 ## Troubleshooting
@@ -1475,16 +1458,6 @@ NUCLEI_EXCLUDE_TEMPLATES = ["fuzzing"]
 # Reduce parallel operations
 NUCLEI_BULK_SIZE = 10
 NUCLEI_CONCURRENCY = 10
-```
-
-#### Tor connection issues
-
-```bash
-# Check Tor status
-sudo systemctl status tor
-
-# Test SOCKS proxy
-curl --socks5-hostname localhost:9050 https://check.torproject.org/api/ip
 ```
 
 #### DAST mode finds nothing
@@ -1562,7 +1535,7 @@ docker run --rm \
 | Rate limiting/bans | Reduce `NUCLEI_RATE_LIMIT` |
 | WAF blocking | Reduce concurrency, use delays |
 | Service disruption | Exclude `dos` and `fuzz` tags |
-| Detection | Use Tor, reduce rate limit |
+| Detection | Reduce rate limit |
 | Account lockouts | Exclude `brute` tag |
 
 ### Safe Defaults

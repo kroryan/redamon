@@ -132,19 +132,6 @@ def pull_naabu_docker_image(docker_image: str) -> bool:
         return False
 
 
-def is_tor_running() -> bool:
-    """Check if Tor SOCKS proxy is available."""
-    try:
-        import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex(('127.0.0.1', 9050))
-        sock.close()
-        return result == 0
-    except Exception:
-        return False
-
-
 # =============================================================================
 # Target Extraction
 # =============================================================================
@@ -234,7 +221,7 @@ def get_host_path(container_path: str) -> str:
     return container_path
 
 
-def build_naabu_command(targets_file: str, output_file: str, settings: dict, use_proxy: bool = False) -> List[str]:
+def build_naabu_command(targets_file: str, output_file: str, settings: dict) -> List[str]:
     """
     Build the Docker command for running Naabu.
 
@@ -242,7 +229,6 @@ def build_naabu_command(targets_file: str, output_file: str, settings: dict, use
         targets_file: Path to file containing targets (one per line)
         output_file: Path for JSON output
         settings: Settings dictionary from main.py
-        use_proxy: Whether to use Tor proxy
 
     Returns:
         List of command arguments
@@ -317,10 +303,6 @@ def build_naabu_command(targets_file: str, output_file: str, settings: dict, use
 
     if NAABU_PASSIVE_MODE:
         cmd.append("-passive")
-
-    # Proxy support (naabu expects just ip:port for socks5 proxy)
-    if use_proxy:
-        cmd.extend(["-proxy", "127.0.0.1:9050"])
 
     return cmd
 
@@ -529,7 +511,6 @@ def run_port_scan(recon_data: dict, output_file: Path = None, settings: dict = N
             ("NAABU_SKIP_HOST_DISCOVERY", "Behavior"),
             ("NAABU_VERIFY_PORTS", "Behavior"),
             ("NAABU_PASSIVE_MODE", "Behavior"),
-            ("USE_TOR_FOR_RECON", "Anonymity"),
         ],
     )
 
@@ -541,7 +522,6 @@ def run_port_scan(recon_data: dict, output_file: Path = None, settings: dict = N
     NAABU_SCAN_TYPE = settings.get('NAABU_SCAN_TYPE', 's')
     NAABU_EXCLUDE_CDN = settings.get('NAABU_EXCLUDE_CDN', False)
     NAABU_PASSIVE_MODE = settings.get('NAABU_PASSIVE_MODE', False)
-    USE_TOR_FOR_RECON = settings.get('USE_TOR_FOR_RECON', False)
 
     # Check Docker
     if not is_docker_installed():
@@ -556,15 +536,6 @@ def run_port_scan(recon_data: dict, output_file: Path = None, settings: dict = N
     if not pull_naabu_docker_image(NAABU_DOCKER_IMAGE):
         print("[!][Naabu] Failed to get Docker image")
         return recon_data
-
-    # Check Tor if enabled
-    use_proxy = False
-    if USE_TOR_FOR_RECON:
-        if is_tor_running():
-            print("[✓][Naabu] Tor proxy detected — enabling anonymous scanning")
-            use_proxy = True
-        else:
-            print("[!][Naabu] Tor not running — scanning without proxy")
 
     # Extract targets
     print("[*][Naabu] Extracting targets from recon data...")
@@ -598,7 +569,7 @@ def run_port_scan(recon_data: dict, output_file: Path = None, settings: dict = N
         naabu_output = scan_temp_dir / "naabu_output.json"
 
         # Build and run command
-        cmd = build_naabu_command(str(targets_file), str(naabu_output), settings, use_proxy)
+        cmd = build_naabu_command(str(targets_file), str(naabu_output), settings)
 
         print(f"[*][Naabu] Starting scan...")
         print(f"[*][Naabu] Scan type: {'SYN' if NAABU_SCAN_TYPE == 's' else 'CONNECT'}")
@@ -626,7 +597,7 @@ def run_port_scan(recon_data: dict, output_file: Path = None, settings: dict = N
                 print(f"[*][Naabu] Retrying with CONNECT scan...")
                 settings_copy = settings.copy()
                 settings_copy['NAABU_SCAN_TYPE'] = 'c'
-                cmd = build_naabu_command(str(targets_file), str(naabu_output), settings_copy, use_proxy)
+                cmd = build_naabu_command(str(targets_file), str(naabu_output), settings_copy)
                 actual_scan_type = 'c'
 
             process = subprocess.Popen(
@@ -691,7 +662,7 @@ def run_port_scan(recon_data: dict, output_file: Path = None, settings: dict = N
                 "ports_config": NAABU_CUSTOM_PORTS if NAABU_CUSTOM_PORTS else f"top-{NAABU_TOP_PORTS}",
                 "rate_limit": NAABU_RATE_LIMIT,
                 "passive_mode": NAABU_PASSIVE_MODE,
-                "proxy_used": use_proxy,
+                "proxy_used": False,
                 "total_targets": len(all_targets),
                 "cdn_exclusion": NAABU_EXCLUDE_CDN
             },

@@ -8,9 +8,6 @@ dnspython==2.8.0             # DNS resolution
 requests>=2.31.0             # HTTP requests
 urllib3>=2.0.0               # HTTP library
 
-# Tor/Anonymity support
-PySocks>=1.7.1               # SOCKS proxy support for Tor
-
 # GitHub secret hunting
 PyGithub>=2.1.1              # GitHub API client
 

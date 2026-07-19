@@ -17,7 +17,6 @@ from .subprocess_helpers import run_with_heartbeat
 def run_katana_crawler(
     target_urls: List[str],
     docker_image: str,
-    use_proxy: bool = False,
     # Katana configuration
     depth: int = 3,
     max_urls: int = 500,
@@ -35,7 +34,6 @@ def run_katana_crawler(
     Args:
         target_urls: Base URLs to crawl (e.g., ["http://example.com"])
         docker_image: Katana Docker image to use
-        use_proxy: Whether to use Tor proxy
         depth: Crawl depth
         max_urls: Maximum URLs to discover
         rate_limit: Requests per second
@@ -93,10 +91,6 @@ def run_katana_crawler(
         if custom_headers:
             for header in custom_headers:
                 cmd.extend(["-H", header])
-        
-        # Proxy for Tor
-        if use_proxy:
-            cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
         
         try:
             # Emit a heartbeat every 30s while Katana crawls so the drawer

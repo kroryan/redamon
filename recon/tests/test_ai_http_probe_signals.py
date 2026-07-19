@@ -850,7 +850,6 @@ def test_httpx_docker_command_joins_paths_with_commas_not_repeated_flag():
         targets_file="/tmp/fake-targets.txt",
         output_file="/tmp/fake-output.json",
         settings=settings,
-        use_proxy=False,
     )
     # Exactly ONE `-path` flag with all 4 paths joined by commas
     path_flag_count = sum(1 for arg in cmd if arg == "-path")
@@ -876,7 +875,6 @@ def test_httpx_docker_command_omits_path_flag_when_no_paths_configured():
         targets_file="/tmp/x.txt",
         output_file="/tmp/y.json",
         settings={"HTTPX_PATHS": []},
-        use_proxy=False,
     )
     assert "-path" not in cmd, "empty HTTPX_PATHS must not emit a -path flag"
 
@@ -897,7 +895,6 @@ def test_httpx_docker_command_includes_net_host():
         targets_file="/tmp/fake-targets.txt",
         output_file="/tmp/fake-output.json",
         settings={},
-        use_proxy=False,
     )
     assert "--net=host" in cmd, (
         "httpx docker run is missing --net=host — loopback targets will "

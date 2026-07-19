@@ -29,7 +29,6 @@ def run_katana_crawler(
     allowed_hosts: set,
     custom_headers: List[str],
     exclude_patterns: List[str],
-    use_proxy: bool = False,
     parallelism: int = 5,
     concurrency: int = 10,
 ) -> Tuple[List[str], Dict[str, str]]:
@@ -58,7 +57,6 @@ def run_katana_crawler(
         allowed_hosts: Set of hostnames from the recon pipeline (for scope filtering)
         custom_headers: Custom headers to send
         exclude_patterns: URL patterns to exclude
-        use_proxy: Whether to use Tor proxy
         parallelism: Number of target URLs to crawl simultaneously (-p flag)
         concurrency: Number of concurrent fetchers per target (-c flag)
 
@@ -143,10 +141,6 @@ def run_katana_crawler(
         if custom_headers:
             for header in custom_headers:
                 cmd.extend(["-H", header])
-
-        # Proxy for Tor
-        if use_proxy:
-            cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
         try:
             # Stream output line-by-line so we can enforce max_urls and kill early
@@ -266,7 +260,6 @@ def run_katana_crawler(
 
 def fetch_forms_from_urls(
     urls: List[str],
-    use_proxy: bool = False,
     max_urls: int = 50
 ) -> List[Dict]:
     """
@@ -274,7 +267,6 @@ def fetch_forms_from_urls(
 
     Args:
         urls: URLs to fetch (will filter to HTML pages only)
-        use_proxy: Whether to use Tor proxy
         max_urls: Maximum URLs to fetch for form extraction
 
     Returns:
@@ -306,15 +298,7 @@ def fetch_forms_from_urls(
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
 
-    # Setup proxy if needed
-    if use_proxy:
-        proxy_handler = urllib.request.ProxyHandler({
-            'http': 'socks5://127.0.0.1:9050',
-            'https': 'socks5://127.0.0.1:9050'
-        })
-        opener = urllib.request.build_opener(proxy_handler, urllib.request.HTTPSHandler(context=ssl_context))
-    else:
-        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
 
     for url in html_urls:
         try:

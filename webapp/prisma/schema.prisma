@@ -239,7 +239,6 @@ model Project {
   // ========== SCAN MODULES ==========
   scanModules                 String[] @default(["domain_discovery", "port_scan", "http_probe", "resource_enum", "vuln_scan"]) @map("scan_modules")
   updateGraphDb               Boolean  @default(true) @map("update_graph_db")
-  useTorForRecon              Boolean  @default(false) @map("use_tor_for_recon")
   useBruteforceForSubdomains  Boolean  @default(false) @map("use_bruteforce_for_subdomains")
 
   // ========== WHOIS/DNS ==========

@@ -76,7 +76,6 @@ Discover every subdomain that exists and squeeze every possible takeover finding
     scanModules: ['domain_discovery', 'http_probe', 'resource_enum', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // ============================================================
     // DISCOVERY LAYER -- maximum breadth

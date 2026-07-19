@@ -51,7 +51,6 @@ Use \`Web App Pentester\` or \`Full Active Scan\` if you want WCP as one tool am
     scanModules: ['domain_discovery', 'http_probe', 'resource_enum', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain discovery: passive (surface CDN-fronted hosts; no brute force) ---
     subdomainDiscoveryEnabled: true,

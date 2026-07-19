@@ -207,40 +207,6 @@ def test_ffuf_run_builds_correct_command():
     print("PASS: test_ffuf_run_builds_correct_command")
 
 
-def test_ffuf_run_with_proxy():
-    """Verify proxy flag is added when use_proxy=True."""
-    from recon.helpers.resource_enum.ffuf_helpers import run_ffuf_discovery
-
-    captured_cmd = {}
-
-    def fake_run(cmd, **kwargs):
-        captured_cmd['cmd'] = cmd
-        return mock.MagicMock(returncode=0)
-
-    with mock.patch("subprocess.run", side_effect=fake_run), \
-         mock.patch("tempfile.mkdtemp", return_value="/tmp/test_ffuf"), \
-         mock.patch("shutil.rmtree"), \
-         mock.patch("os.path.exists", return_value=False):
-
-        run_ffuf_discovery(
-            target_urls=["https://example.com"],
-            wordlist="/wordlists/common.txt",
-            threads=10, rate=0, timeout=10, max_time=60,
-            match_codes=[200], filter_codes=[], filter_size="",
-            extensions=[], recursion=False, recursion_depth=2,
-            auto_calibrate=False, custom_headers=[],
-            follow_redirects=False,
-            allowed_hosts={"example.com"},
-            use_proxy=True,
-        )
-
-    cmd = captured_cmd['cmd']
-    assert "-x" in cmd
-    proxy_idx = cmd.index("-x") + 1
-    assert "socks5://127.0.0.1:9050" == cmd[proxy_idx]
-    print("PASS: test_ffuf_run_with_proxy")
-
-
 def test_ffuf_run_timeout_handling():
     """FFuf should handle subprocess timeout gracefully."""
     from recon.helpers.resource_enum.ffuf_helpers import run_ffuf_discovery

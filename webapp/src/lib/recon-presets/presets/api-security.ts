@@ -49,7 +49,6 @@ Pentesters and security engineers testing REST APIs, GraphQL endpoints, or micro
     scanModules: ['domain_discovery', 'port_scan', 'http_probe', 'resource_enum', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools ---
     subdomainDiscoveryEnabled: true,

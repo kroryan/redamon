@@ -191,7 +191,6 @@ def run_kiterunner_discovery(
     match_status: List[int],
     min_content_length: int,
     headers: List[str],
-    use_proxy: bool = False,
 ) -> List[Dict]:
     """
     Run Kiterunner API endpoint bruteforcing.
@@ -213,7 +212,6 @@ def run_kiterunner_discovery(
         match_status: Status codes to match
         min_content_length: Minimum content length to include
         headers: Custom headers to send
-        use_proxy: Whether to use Tor proxy
 
     Returns:
         List of discovered endpoint dictionaries with url, path, method, status
@@ -297,10 +295,6 @@ def run_kiterunner_discovery(
         # Custom headers
         for header in headers:
             cmd.extend(["-H", header])
-
-        # Proxy support
-        if use_proxy:
-            cmd.extend(["--proxy", "socks5://127.0.0.1:9050"])
 
         try:
             print(f"[*][Kiterunner] Command: {' '.join(cmd[:6])}...")  # Show partial command
@@ -557,7 +551,6 @@ def detect_kiterunner_methods(
     method_detect_timeout: int,
     method_detect_rate_limit: int,
     method_detect_threads: int,
-    use_proxy: bool = False
 ) -> Dict[str, List[str]]:
     """
     Detect allowed HTTP methods for Kiterunner-discovered endpoints.
@@ -575,7 +568,6 @@ def detect_kiterunner_methods(
         method_detect_timeout: Timeout for method detection
         method_detect_rate_limit: Rate limit for method detection
         method_detect_threads: Number of threads for detection
-        use_proxy: Whether to use Tor proxy
 
     Returns:
         Dict mapping URL -> list of allowed methods (e.g., ["GET", "POST"])
@@ -631,9 +623,6 @@ def detect_kiterunner_methods(
                 "-timeout", str(method_detect_timeout),
                 "-rl", str(method_detect_rate_limit),
             ]
-
-            if use_proxy:
-                cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
             try:
                 subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -707,9 +696,6 @@ def detect_kiterunner_methods(
                     "-timeout", str(method_detect_timeout),
                     "-rl", str(method_detect_rate_limit),
                 ]
-
-                if use_proxy:
-                    cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
                 try:
                     subprocess.run(cmd, capture_output=True, text=True, timeout=300)

@@ -368,26 +368,6 @@ def test_run_for_domain_captures_stdout():
     print("PASS: test_run_for_domain_captures_stdout")
 
 
-def test_run_for_domain_with_proxy():
-    """Should include --proxy flag when use_proxy=True."""
-    from recon.helpers.resource_enum.paramspider_helpers import run_paramspider_for_domain
-
-    with mock.patch("subprocess.run") as mock_run:
-        mock_run.return_value = mock.MagicMock(stdout="", stderr="", returncode=0)
-        run_paramspider_for_domain(
-            domain="example.com",
-            placeholder="FUZZ",
-            timeout=60,
-            use_proxy=True,
-        )
-
-    cmd = mock_run.call_args[0][0]
-    assert '--proxy' in cmd
-    assert '127.0.0.1:9050' in cmd
-
-    print("PASS: test_run_for_domain_with_proxy")
-
-
 def test_run_for_domain_handles_timeout():
     """Should return empty list on timeout without raising."""
     from recon.helpers.resource_enum.paramspider_helpers import run_paramspider_for_domain
@@ -571,7 +551,6 @@ if __name__ == "__main__":
     test_merge_url_without_params_creates_endpoint()
     test_merge_deduplicates_across_urls()
     test_run_for_domain_captures_stdout()
-    test_run_for_domain_with_proxy()
     test_run_for_domain_handles_timeout()
     test_run_for_domain_handles_missing_binary()
     test_run_for_domain_reads_output_file()

@@ -51,7 +51,6 @@ Network pentesters and infrastructure security teams mapping an external or inte
     scanModules: ['domain_discovery', 'port_scan', 'http_probe', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools, high limits ---
     subdomainDiscoveryEnabled: true,

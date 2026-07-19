@@ -51,9 +51,8 @@ Bug bounty hunters who have already triaged a target (perhaps with the Quick Win
     // Modules: all except port_scan (web-focused) and js_recon handled via tool toggle
     scanModules: ['domain_discovery', 'http_probe', 'resource_enum', 'vuln_scan', 'js_recon'],
 
-    // No stealth, no Tor
+    // No stealth
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools at high limits ---
     subdomainDiscoveryEnabled: true,

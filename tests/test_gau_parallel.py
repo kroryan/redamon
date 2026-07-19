@@ -437,7 +437,6 @@ class TestParameterPassthrough(unittest.TestCase):
             max_urls=500,
             year_range=["2020", "2024"],
             verbose=True,
-            use_proxy=True,
             urlscan_api_key="test-key-123"
         )
 
@@ -452,7 +451,6 @@ class TestParameterPassthrough(unittest.TestCase):
         self.assertEqual(kwargs["max_urls"], 500)
         self.assertEqual(kwargs["year_range"], ["2020", "2024"])
         self.assertTrue(kwargs["verbose"])
-        self.assertTrue(kwargs["use_proxy"])
         self.assertEqual(kwargs["urlscan_api_key"], "test-key-123")
 
 
