@@ -169,7 +169,12 @@ def execute_curl(args: str, _redamon_ctx: str = "") -> str:
         if _cap_url and _cap_tok:
             # APPEND (not prepend) so a later user-supplied -x/--proxy cannot
             # override enforced routing and exfiltrate the tag (curl is last-wins).
-            cmd_args = cmd_args + ["-x", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_tok}"]
+            # -k is REQUIRED: the capture proxy MITMs TLS with its own (untrusted) CA,
+            # so without it every https request fails the handshake (curl exit 000)
+            # and nothing is captured. Only in the routing branch; direct curl keeps
+            # cert validation. The target's real cert is already invisible behind the
+            # MITM proxy, so -k costs no inspection the agent could otherwise do.
+            cmd_args = cmd_args + ["-x", _cap_url, "-k", "-H", f"X-Redamon-Ctx: {_cap_tok}"]
         result = subprocess.run(
             ["curl"] + cmd_args,
             capture_output=True,
@@ -892,6 +897,18 @@ def execute_wpscan(args: str, _redamon_ctx: str = "") -> str:
     """
     try:
         cmd_args = shlex.split(args)
+        # wpscan REQUIRES the target via --url (a bare positional URL makes it exit
+        # immediately with "One of the following options is required: --url"). The
+        # agent LLM frequently passes the URL positionally, so normalize the first
+        # URL-like positional token to `--url <token>` when no mode flag is present.
+        _wp_modes = {"--url", "-u", "--update", "--help", "-h", "--hh", "--version"}
+        if not (_wp_modes & set(cmd_args)):
+            for _i, _t in enumerate(cmd_args):
+                if _t.startswith(("http://", "https://")) or (
+                    "." in _t and "/" not in _t and ":" not in _t and not _t.startswith("-")
+                ):
+                    cmd_args[_i:_i + 1] = ["--url", _t]
+                    break
         # HTTP traffic capture (Phase 1): route through the capture proxy when a
         # tag is present + reachable. wpscan uses --proxy and a single --headers
         # value, so merge the tag into any existing --headers (else append one).

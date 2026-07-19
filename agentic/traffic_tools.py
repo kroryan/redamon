@@ -14,6 +14,7 @@ executor before it reaches the LLM (§15.6). psycopg3 (already the stack's drive
 """
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -102,6 +103,31 @@ def _build_search_where(f: Dict[str, Any], params: Dict[str, Any]) -> List[str]:
     return where
 
 
+def _coerce_json_obj(v) -> Dict[str, Any]:
+    """Accept a JSON object as EITHER a dict (langchain/LLMs frequently pass
+    structured tool args directly as an object) OR a JSON string. Empty -> {}.
+    Prevents the common 'passed a dict, tool wanted a JSON string' first-call
+    failure. Raises ValueError/TypeError on anything else (caught by callers)."""
+    if isinstance(v, dict):
+        return v
+    if v is None:
+        return {}
+    s = str(v).strip()
+    if not s:
+        return {}
+    try:
+        obj = json.loads(s)
+    except (ValueError, TypeError):
+        # The tool schema types this arg as `str`, so a dict the LLM passes gets
+        # coerced to a Python repr ({'host': 'x'} with single quotes) that is not
+        # valid JSON. literal_eval recovers that safely (objects/lists/scalars only,
+        # never code execution).
+        obj = ast.literal_eval(s)
+    if not isinstance(obj, dict):
+        raise ValueError("not a JSON object")
+    return obj
+
+
 @tool
 async def proxy_search(filters: str = "") -> str:
     """Search captured HTTP traffic — the Burp-style request history. Returns
@@ -114,7 +140,7 @@ async def proxy_search(filters: str = "") -> str:
     if not u or not p:
         return "Error: missing tenant context"
     try:
-        f = json.loads(filters) if filters and filters.strip() else {}
+        f = _coerce_json_obj(filters)
     except (ValueError, TypeError):
         return "Error: `filters` must be a JSON object (or empty)"
     params: Dict[str, Any] = {"p": p, "u": u}
@@ -347,17 +373,24 @@ _OPS = {"=": "=", "!=": "!=", ">": ">", ">=": ">=", "<": "<", "<=": "<=",
 async def proxy_query(spec: str) -> str:
     """Ad-hoc analytical query over the traffic table — the power-user escape
     hatch for questions the shaped tools don't cover (e.g. counts/group-bys for
-    IDOR/BOLA hunting). `spec` is a JSON object built from an ALLOWLIST (raw SQL
-    is NOT accepted): {
+    IDOR/BOLA hunting). NOT raw text-to-SQL: `spec` is a JSON object built from an
+    ALLOWLIST (raw SQL is NOT accepted), so you do NOT need the DB schema — use only
+    the columns below. {
       select: [{col|agg:"count", col?:"id", as?:"n"}...],   // columns or aggregates
       where:  [{col, op, val}...],   // op: = != > >= < <= like is_null not_null
       group_by: [col...], order_by: [{col|as, dir:"asc|desc"}...], limit: N (<=200) }.
+    Queryable COLUMNS (nothing else is allowed; bodies + tenant columns are
+    deliberately NOT queryable): id, started_at, source, run_id, session_id, tool,
+    phase, method, scheme, host, port, path, status_code, resp_body_size,
+    resp_content_type, response_time_ms, is_tls, is_replay, had_auth,
+    has_set_cookie, reflected_params, blocked, in_scope.
+    Aggregations: count, sum, avg, min, max.
     Tenant scope (your project + user) is ALWAYS enforced in code."""
     u, p = _tenant()
     if not u or not p:
         return "Error: missing tenant context"
     try:
-        q = json.loads(spec)
+        q = _coerce_json_obj(spec)
     except (ValueError, TypeError):
         return "Error: `spec` must be a JSON object"
     params: Dict[str, Any] = {"p": p, "u": u}

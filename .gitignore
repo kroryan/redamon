@@ -238,3 +238,4 @@ DevergoLabs/
 # Deploy plan (local only)
 deploy/DEPLOY_PLAN_EC2.md
 deploy/single-host/E2E_DEPLOY_TEST_PROMPT.md
+redamon-session-*.md
