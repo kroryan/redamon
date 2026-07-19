@@ -167,7 +167,9 @@ def execute_curl(args: str, _redamon_ctx: str = "") -> str:
         from capture_routing import agent_capture_routing
         _cap_url, _cap_tok = agent_capture_routing(_redamon_ctx)
         if _cap_url and _cap_tok:
-            cmd_args = ["-x", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_tok}"] + cmd_args
+            # APPEND (not prepend) so a later user-supplied -x/--proxy cannot
+            # override enforced routing and exfiltrate the tag (curl is last-wins).
+            cmd_args = cmd_args + ["-x", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_tok}"]
         result = subprocess.run(
             ["curl"] + cmd_args,
             capture_output=True,
@@ -287,7 +289,9 @@ def execute_httpx(args: str, _redamon_ctx: str = "") -> str:
         from capture_routing import agent_capture_routing
         _cap_url, _cap_tok = agent_capture_routing(_redamon_ctx)
         if _cap_url and _cap_tok:
-            cmd_args = ["-proxy", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_tok}"] + cmd_args
+            # APPEND so a later user-supplied -proxy cannot override enforced
+            # routing and exfiltrate the tag (httpx is last-wins).
+            cmd_args = cmd_args + ["-proxy", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_tok}"]
         result = subprocess.run(
             ["httpx"] + cmd_args,
             capture_output=True,

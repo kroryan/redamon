@@ -24,15 +24,19 @@ publish (127.0.0.1:<port>).
 """
 import os
 import socket
+import time
 
 from helpers.redamon_ctx import sign_tag
 
 # Module-level context: recon runs one scan per process, so a single configure()
 # call at startup is the right lifetime.
-_config = {"enabled": False, "port": 8888, "reachable": False}
+_config = {"enabled": False, "port": 8888, "reachable": False, "probed_at": 0.0}
 _token_cache: dict = {}
 
 _PROXY_HOST = "127.0.0.1"
+# Re-probe reachability at most this often so a proxy that dies mid-scan makes
+# tools fall back to DIRECT (fail-open, §20.1) instead of failing to a dead proxy.
+_REPROBE_TTL = 15.0
 
 
 def _proxy_port() -> int:
@@ -53,17 +57,31 @@ def is_capture_proxy_reachable(host: str = _PROXY_HOST, port: int = None, timeou
 
 
 def configure(settings) -> None:
-    """Read the per-project gate + probe reachability once. Idempotent."""
+    """Read the per-project gate + probe reachability. Idempotent."""
     port = _proxy_port()
-    enabled = bool(settings and settings.get("CAPTURE_PROXY_ENABLED"))
+    # Accept both the recon-settings form (UPPER_SNAKE) and a raw project dict
+    # (camelCase) so full AND partial recon can both configure from their config.
+    enabled = bool(settings and (settings.get("CAPTURE_PROXY_ENABLED") or settings.get("captureProxyEnabled")))
     reachable = is_capture_proxy_reachable(port=port) if enabled else False
-    _config.update(enabled=enabled, port=port, reachable=reachable)
+    _config.update(enabled=enabled, port=port, reachable=reachable, probed_at=time.monotonic())
     _token_cache.clear()
     if enabled and reachable:
         print(f"[*][capture] routing recon HTTP tools through proxy 127.0.0.1:{port}")
     elif enabled and not reachable:
         # §20.1: fail-open — surface the evidence gap but never break the scan.
         print(f"[!][capture] proxy enabled but unreachable on 127.0.0.1:{port} — recon runs DIRECT (capture degraded)")
+
+
+def _reachable_now() -> bool:
+    """Cached reachability with a short TTL so a mid-scan proxy death flips us
+    back to direct (fail-open) rather than routing to a dead port."""
+    if not _config["enabled"]:
+        return False
+    now = time.monotonic()
+    if now - _config["probed_at"] >= _REPROBE_TTL:
+        _config["reachable"] = is_capture_proxy_reachable(port=_config["port"])
+        _config["probed_at"] = now
+    return bool(_config["reachable"])
 
 
 def _run_id() -> str | None:
@@ -81,9 +99,11 @@ def get_capture_routing(tool: str, phase: str = "informational"):
     proxy, else (None, None). The token is signed with SCANNER_API_KEY (§20.4) and
     cached per (tool, phase) since attribution is per-scan, not per-request.
     """
-    if not (_config["enabled"] and _config["reachable"]):
+    if not (_config["enabled"] and _reachable_now()):
         return (None, None)
-    key = os.environ.get("SCANNER_API_KEY") or os.environ.get("INTERNAL_API_KEY", "")
+    # source="recon" tags verify ONLY against SCANNER_API_KEY on the ingest side,
+    # so signing with anything else would produce a permanently-unverifiable tag.
+    key = os.environ.get("SCANNER_API_KEY", "")
     if not key:
         return (None, None)
 

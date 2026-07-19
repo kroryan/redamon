@@ -23,11 +23,12 @@ current_graph_view_cypher: ContextVar[Optional[str]] = ContextVar(
 
 
 def set_tenant_context(user_id: str, project_id: str, session_id: str = "") -> None:
-    """Set the current user, project (and optionally session) context for tools."""
+    """Set the current user, project (and session) context for tools."""
     current_user_id.set(user_id)
     current_project_id.set(project_id)
-    if session_id:
-        current_session_id.set(session_id)
+    # Always set (even to "") so a later call can't inherit a previous call's
+    # session_id and mis-attribute a captured request.
+    current_session_id.set(session_id or "")
 
 
 def set_phase_context(phase: str) -> None:

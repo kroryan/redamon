@@ -111,6 +111,33 @@ class TestRouting(unittest.TestCase):
             pr.configure({"CAPTURE_PROXY_ENABLED": True})
             self.assertEqual(pr.get_capture_routing("katana"), (None, None))
 
+    def test_no_internal_fallback_for_recon(self):
+        # REGRESSION: source=recon tags verify ONLY against SCANNER_API_KEY, so a
+        # missing scanner key must NOT fall back to INTERNAL (that tag never verifies).
+        pr.is_capture_proxy_reachable = lambda **k: True
+        with mock.patch.dict(os.environ, {"SCANNER_API_KEY": "", "INTERNAL_API_KEY": "internal"}, clear=False):
+            pr.configure({"CAPTURE_PROXY_ENABLED": True})
+            self.assertEqual(pr.get_capture_routing("katana"), (None, None))
+
+    def test_reprobe_flips_to_direct_when_proxy_dies(self):
+        # REGRESSION (§20.1 fail-open): a proxy that dies mid-scan must flip routing
+        # back to direct on the next re-probe, not keep routing to a dead port.
+        alive = {"v": True}
+        pr.is_capture_proxy_reachable = lambda **k: alive["v"]
+        with mock.patch.dict(os.environ, {"PROJECT_ID": "p1", "USER_ID": "u1", "SCANNER_API_KEY": SCANNER}, clear=False):
+            pr.configure({"CAPTURE_PROXY_ENABLED": True})
+            self.assertIsNotNone(pr.get_capture_routing("katana")[0])  # routing on
+            alive["v"] = False
+            pr._config["probed_at"] = 0.0  # force the TTL to expire -> re-probe
+            self.assertEqual(pr.get_capture_routing("katana"), (None, None))  # fell to direct
+
+    def test_configure_camelcase_gate(self):
+        # partial recon passes a raw project dict (camelCase captureProxyEnabled).
+        pr.is_capture_proxy_reachable = lambda **k: True
+        with mock.patch.dict(os.environ, {"PROJECT_ID": "p1", "USER_ID": "u1", "SCANNER_API_KEY": SCANNER}, clear=False):
+            pr.configure({"captureProxyEnabled": True})
+            self.assertIsNotNone(pr.get_capture_routing("katana")[0])
+
     def test_token_cached_per_tool(self):
         pr.is_capture_proxy_reachable = lambda **k: True
         with mock.patch.dict(os.environ, {

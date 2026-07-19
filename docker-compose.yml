@@ -892,7 +892,7 @@ services:
     # confdir=/ca keeps the mitmproxy CA (a forge-anything key, §15.9) on a
     # restricted volume readable only by this container; the private key never
     # leaves it. stream_large_bodies bounds memory on huge responses.
-    command: ["mitmdump","--quiet","--set","confdir=/ca","--set","stream_large_bodies=5m","--listen-port","8888","-s","/app/capture_addon.py"]
+    command: ["mitmdump","--quiet","--set","confdir=/ca","--set","connection_strategy=lazy","--set","stream_large_bodies=5m","--listen-port","8888","-s","/app/capture_addon.py"]
     environment:
       CAPTURE_SPOOL_DIR: /spool
       CAPTURE_BODIES_DIR: /bodies

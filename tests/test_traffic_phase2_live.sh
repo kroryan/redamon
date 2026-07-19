@@ -74,12 +74,18 @@ DEL="$(curl -s -b "$TMP/a.jar" -X DELETE "$BASE/api/traffic/$PA_ID" -H 'Content-
 contains "delete-all-matching 5xx removed 1" "$DEL" '"deleted":1'
 check "remaining rows after filter-delete" "1" "$(psql_ "SELECT count(*) FROM captured_http_transactions WHERE run_id='ttest-p2';" | tr -d '\r\n ')"
 
-echo "== Batch delete (ids) removes the offloaded row + GCs its blob =="
+echo "== Batch delete (ids): row removed; fresh blob SPARED by GC grace window =="
 DEL2="$(curl -s -b "$TMP/a.jar" -X DELETE "$BASE/api/traffic/$PA_ID" -H 'Content-Type: application/json' -d "{\"ids\":[\"$ROWID\"]}")"
 contains "delete-by-id removed 1" "$DEL2" '"deleted":1'
-contains "blob GC'd with the row" "$DEL2" '"blobsDeleted":1'
+contains "freshly-written blob spared (grace window)" "$DEL2" '"blobsDeleted":0'
 BLOB_LEFT="$(docker run --rm -v redamon_capture_bodies:/b alpine sh -c "ls /b/$SHA 2>/dev/null | wc -l" | tr -d '\r\n ')"
-check "offloaded blob removed from disk" "0" "$BLOB_LEFT"
+check "blob still present right after delete (grace)" "1" "$BLOB_LEFT"
+
+echo "== Age the orphaned blob, then the maintenance orphan sweep GCs it =="
+docker run --rm -v redamon_capture_bodies:/b alpine touch -d '2020-01-01' "/b/$SHA" >/dev/null 2>&1
+curl -s -o /dev/null -X POST "$BASE/api/traffic/maintenance" -H "X-Internal-Key: $IKEY" -d '{}'
+BLOB_LEFT2="$(docker run --rm -v redamon_capture_bodies:/b alpine sh -c "ls /b/$SHA 2>/dev/null | wc -l" | tr -d '\r\n ')"
+check "aged orphan blob swept by maintenance" "0" "$BLOB_LEFT2"
 
 echo "== Maintenance route (internal key) =="
 check "maintenance -> 200" 200 "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/traffic/maintenance" -H "X-Internal-Key: $IKEY" -d '{}')"

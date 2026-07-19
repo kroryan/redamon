@@ -13,6 +13,9 @@ import prisma from '@/lib/prisma'
 
 const BODIES_DIR = process.env.CAPTURE_BODIES_DIR || '/capture-bodies'
 const SHA_RE = /^[0-9a-f]{64}$/
+// Never GC a blob written within this window: its ingest row may still be
+// in flight (uncommitted), so the reference query would miss it (TOCTOU).
+const GC_GRACE_MS = 5 * 60 * 1000
 
 /** A sha must be a 64-char lowercase hex string — blocks path traversal. */
 export function isValidSha(sha: string | null | undefined): sha is string {
@@ -64,15 +67,20 @@ export async function gcOrphanBodies(candidateShas?: (string | null | undefined)
     }
   }
 
+  const now = Date.now()
   let deleted = 0
   for (const sha of shas) {
-    if (!referenced.has(sha)) {
-      try {
-        await fs.unlink(path.join(BODIES_DIR, sha))
-        deleted++
-      } catch {
-        // already gone / not present — fine
-      }
+    if (referenced.has(sha)) continue
+    const blobPath = path.join(BODIES_DIR, sha)
+    try {
+      // Grace window: skip freshly-written blobs (a concurrent ingest row may not
+      // be committed yet, so it wouldn't show in the reference query above).
+      const st = await fs.stat(blobPath)
+      if (now - st.mtimeMs < GC_GRACE_MS) continue
+      await fs.unlink(blobPath)
+      deleted++
+    } catch {
+      // already gone / not present — fine
     }
   }
   return { deleted }

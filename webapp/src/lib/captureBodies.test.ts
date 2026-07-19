@@ -10,11 +10,13 @@ import { describe, test, expect, vi, beforeEach } from 'vitest'
 const mockReaddir = vi.fn()
 const mockUnlink = vi.fn()
 const mockReadFile = vi.fn()
+const mockStat = vi.fn()
 vi.mock('fs', () => ({
   promises: {
     readdir: (...a: unknown[]) => mockReaddir(...a),
     unlink: (...a: unknown[]) => mockUnlink(...a),
     readFile: (...a: unknown[]) => mockReadFile(...a),
+    stat: (...a: unknown[]) => mockStat(...a),
   },
 }))
 
@@ -30,8 +32,10 @@ const SHA_B = 'b'.repeat(64)
 const SHA_C = 'c'.repeat(64)
 
 beforeEach(() => {
-  mockReaddir.mockReset(); mockUnlink.mockReset(); mockReadFile.mockReset(); mockFindMany.mockReset()
+  mockReaddir.mockReset(); mockUnlink.mockReset(); mockReadFile.mockReset(); mockFindMany.mockReset(); mockStat.mockReset()
   mockUnlink.mockResolvedValue(undefined)
+  // Default: blobs are old (mtime 0) so they're outside the GC grace window.
+  mockStat.mockResolvedValue({ mtimeMs: 0 })
 })
 
 describe('isValidSha (path-traversal guard)', () => {
@@ -83,5 +87,13 @@ describe('gcOrphanBodies (ref-counted)', () => {
     await gcOrphanBodies(['../evil', SHA_A])
     const unlinked = mockUnlink.mock.calls.map(c => String(c[0]))
     expect(unlinked.every(p => !p.includes('evil'))).toBe(true)
+  })
+
+  test('REGRESSION: a freshly-written orphan blob is spared (grace window)', async () => {
+    mockFindMany.mockResolvedValue([]) // unreferenced
+    mockStat.mockResolvedValue({ mtimeMs: Date.now() }) // written just now
+    const r = await gcOrphanBodies([SHA_A])
+    expect(r.deleted).toBe(0)
+    expect(mockUnlink).not.toHaveBeenCalled()
   })
 })

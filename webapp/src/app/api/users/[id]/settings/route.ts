@@ -183,9 +183,14 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const captureIntFields = ['captureProxyPort', 'captureProxyMaxBodyKb', 'captureProxyRetentionDays'] as const
     const captureData: Record<string, boolean | number | string> = {}
     for (const f of captureBoolFields) if (f in body) captureData[f] = Boolean(body[f])
+    // Sane lower bounds — a retentionDays <= 0 would make maintenance delete ALL
+    // traffic; port/maxBodyKb must be positive.
+    const captureIntMin: Record<string, number> = {
+      captureProxyPort: 1, captureProxyMaxBodyKb: 1, captureProxyRetentionDays: 1,
+    }
     for (const f of captureIntFields) if (f in body) {
       const n = parseInt(String(body[f]), 10)
-      if (Number.isFinite(n)) captureData[f] = n
+      if (Number.isFinite(n)) captureData[f] = Math.max(captureIntMin[f] ?? 0, n)
     }
     if ('captureProxyScope' in body && ['recon', 'agent', 'both'].includes(body.captureProxyScope)) {
       captureData.captureProxyScope = body.captureProxyScope

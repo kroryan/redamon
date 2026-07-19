@@ -13,8 +13,16 @@ that holds a DB credential, and only a scoped role granted INSERT on exactly
   4. INSERTs the row (bodies were already deduped into the shared content store
      by the proxy; we only reference them by sha).
 
-A record with a missing/invalid tag is rejected (moved aside), never inserted —
-so a compromised proxy cannot inject validated rows.
+A record with a missing/invalid tag is rejected (moved aside), never inserted.
+
+Residual (documented, not fully closed): the tag authenticates only the tenant
+claims, with no nonce/expiry and no binding to the request content. A FULLY
+compromised proxy therefore sees valid tags for the tenants it proxies and could
+replay one to attribute *fabricated* rows to that tenant. This is bounded by the
+INSERT-only role (forged rows are non-readable, purgeable, and land only in a
+tenant whose traffic the proxy already saw) and is the price of keeping the proxy
+credential-free. Closing it fully needs a content-digest + short expiry in the
+tag (a future hardening). See plan §15.13.
 """
 from __future__ import annotations
 
@@ -232,8 +240,17 @@ def _process_one(conn, path, reject_dir, keys, redact) -> None:  # pragma: no co
         conn.execute(sql, values)
         os.unlink(path)
     except Exception as e:
-        print(f"[traffic-ingest] insert failed: {e}", flush=True)
-        _reject(path, reject_dir)
+        import psycopg
+        # Permanent data/constraint problems: the row can never insert -> reject.
+        if isinstance(e, (psycopg.DataError, psycopg.IntegrityError, psycopg.ProgrammingError)):
+            print(f"[traffic-ingest] rejecting bad row: {e}", flush=True)
+            _reject(path, reject_dir)
+        else:
+            # Transient (connection reset, deadlock, timeout, Postgres restart):
+            # leave the spool file in place and re-raise so the outer loop
+            # reconnects and retries — never discard a validly-captured record.
+            print(f"[traffic-ingest] transient insert error (will retry): {e}", flush=True)
+            raise
 
 
 def _reject(path, reject_dir) -> None:  # pragma: no cover

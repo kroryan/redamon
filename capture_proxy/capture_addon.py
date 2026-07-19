@@ -93,10 +93,14 @@ class RedamonCapture:
         flow.metadata["redamon_ctx"] = token
         flow.metadata["redamon_started"] = time.time()
 
-        allowed, pinned_ip, reason = check_egress(
-            flow.request.pretty_host, hard_blocked=_hard_blocked,
-            extra_blocked_ips=self.extra_blocked_ips,
-        )
+        try:
+            allowed, pinned_ip, reason = check_egress(
+                flow.request.pretty_host, hard_blocked=_hard_blocked,
+                extra_blocked_ips=self.extra_blocked_ips,
+            )
+        except Exception as e:  # fail CLOSED — never forward on a guard error
+            allowed, pinned_ip, reason = (False, None, f"guard-error:{e}")
+
         if not allowed:
             # Refuse: do not forward. Record the attempt for the scope audit.
             print(f"[capture] BLOCKED {flow.request.pretty_host} ({reason})", flush=True)
@@ -107,7 +111,18 @@ class RedamonCapture:
             )
             self._emit_blocked(flow, reason)
             return
+
         flow.metadata["redamon_pinned_ip"] = pinned_ip
+        # Pin the upstream connection to the vetted IP so mitmproxy does NOT
+        # re-resolve the hostname and get a rebound internal IP between the guard
+        # check and the connection (DNS-rebinding TOCTOU, §20.5). We set the server
+        # connection address ONLY (not request.host), so the Host header + TLS SNI
+        # keep the original hostname and vhosts/HTTPS still work.
+        if pinned_ip and pinned_ip != flow.request.host:
+            try:
+                flow.server_conn.address = (pinned_ip, flow.request.port)
+            except Exception as e:
+                print(f"[capture] pin failed for {flow.request.pretty_host}: {e}", flush=True)
 
     def response(self, flow: http.HTTPFlow) -> None:
         if flow.metadata.get("redamon_blocked"):

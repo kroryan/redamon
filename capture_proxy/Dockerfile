@@ -38,5 +38,8 @@ USER capture
 
 # Default command is the capture proxy; the ingest service overrides it in compose.
 # --listen-port is provided at runtime; --set stream_large_bodies bounds memory.
-CMD ["mitmdump", "--quiet", "--set", "stream_large_bodies=5m", \
+# connection_strategy=lazy defers the upstream connection until AFTER the request
+# hook, so the addon's DNS-rebinding IP pin (server_conn.address) actually applies.
+CMD ["mitmdump", "--quiet", "--set", "connection_strategy=lazy", \
+     "--set", "stream_large_bodies=5m", \
      "--listen-port", "8888", "-s", "/app/capture_addon.py"]

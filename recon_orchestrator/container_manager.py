@@ -996,6 +996,7 @@ class ContainerManager:
             name=self.CAPTURE_PROXY_NAME,
             detach=True,
             command=["mitmdump", "--quiet", "--set", "confdir=/ca",
+                     "--set", "connection_strategy=lazy",  # so the IP pin applies (§20.5)
                      "--set", "stream_large_bodies=5m",
                      "--listen-port", str(port), "-s", "/app/capture_addon.py"],
             network=self._CAPTURE_PROXY_NETWORK,

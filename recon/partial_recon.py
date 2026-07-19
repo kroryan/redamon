@@ -109,6 +109,14 @@ def main():
     config = load_config()
     tool_id = config.get("tool_id", "")
 
+    # HTTP traffic capture (Phase 1): configure capture-proxy routing for partial
+    # recon too (each partial job is a fresh process, so it must configure itself).
+    try:
+        from helpers.proxy_routing import configure as _configure_capture_routing
+        _configure_capture_routing(config)
+    except Exception as _cap_err:
+        print(f"[!][capture] partial-recon routing not configured: {_cap_err}")
+
     print(f"[*][Partial Recon] Starting partial recon for tool: {tool_id}")
     print(f"[*][Partial Recon] Timestamp: {datetime.now().isoformat()}")
 

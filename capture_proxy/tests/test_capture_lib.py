@@ -34,6 +34,19 @@ class TestEgress(unittest.TestCase):
     def test_extra_blocked_service_ip(self):
         self.assertTrue(egress.is_internal_ip("8.8.8.8", extra_blocked=["8.8.8.8"]))
 
+    def test_extra_blocked_cidr(self):
+        # REGRESSION: a CIDR entry must block by membership, not be ignored.
+        self.assertTrue(egress.is_internal_ip("8.8.8.8", extra_blocked=["8.8.8.0/24"]))
+        self.assertFalse(egress.is_internal_ip("9.9.9.9", extra_blocked=["8.8.8.0/24"]))
+
+    def test_resolve_bad_idna_fails_closed(self):
+        # REGRESSION: an oversized IDNA label raises UnicodeError in getaddrinfo;
+        # resolve must fail CLOSED (empty list) so check_egress blocks it.
+        self.assertEqual(egress.resolve_host("a" * 64 + ".example.com"), [])
+        allowed, _, reason = egress.check_egress("a" * 64 + ".example.com")
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "unresolvable")
+
     def test_check_egress_public_ip_allowed(self):
         allowed, pinned, reason = egress.check_egress("8.8.8.8")
         self.assertTrue(allowed)

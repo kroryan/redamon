@@ -19,7 +19,10 @@ const CSV_COLS = [
 
 function csvCell(v: unknown): string {
   if (v === null || v === undefined) return ''
-  const s = String(v)
+  let s = String(v)
+  // Formula-injection guard: host/path/query come from the (attacker-controlled)
+  // target, so neutralize leading =,+,-,@,tab,CR before a spreadsheet evals them.
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
 }
 
@@ -45,14 +48,18 @@ export async function GET(
 
   const stream = new ReadableStream({
     async start(controller) {
+      // JSON is a wrapper object { rows: [...], truncated, error } so truncation
+      // and mid-stream errors are represented as VALID JSON, not a silent partial
+      // array or an illegal comment.
+      let truncated = false
+      let errored = ''
       try {
         if (format === 'csv') {
           controller.enqueue(encoder.encode(CSV_COLS.join(',') + '\n'))
         } else {
-          controller.enqueue(encoder.encode('[\n'))
+          controller.enqueue(encoder.encode('{"rows":[\n'))
         }
         let cursor: string | undefined
-        let truncated = false
         let first = true
         for (;;) {
           if (sent >= MAX_EXPORT_ROWS) { truncated = true; break }
@@ -76,14 +83,15 @@ export async function GET(
           cursor = rows[rows.length - 1].id
           if (rows.length < take) break
         }
-        if (format === 'json') {
-          controller.enqueue(encoder.encode('\n]\n'))
-        } else if (truncated) {
-          controller.enqueue(encoder.encode(`# TRUNCATED at ${MAX_EXPORT_ROWS} rows — narrow the filters to export the rest\n`))
-        }
       } catch (e) {
-        controller.enqueue(encoder.encode(`\n# export error: ${e}\n`))
+        errored = String(e)
       } finally {
+        if (format === 'json') {
+          controller.enqueue(encoder.encode(`\n],"count":${sent},"truncated":${truncated}${errored ? `,"error":${JSON.stringify(errored)}` : ''}}\n`))
+        } else {
+          if (truncated) controller.enqueue(encoder.encode(`# TRUNCATED at ${MAX_EXPORT_ROWS} rows — narrow the filters to export the rest\n`))
+          if (errored) controller.enqueue(encoder.encode(`# export error: ${errored}\n`))
+        }
         controller.close()
       }
     },

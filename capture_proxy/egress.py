@@ -41,8 +41,14 @@ def is_internal_ip(ip_str: str, extra_blocked: Optional[List[str]] = None) -> bo
         return True
     if extra_blocked:
         for b in extra_blocked:
+            b = b.strip()
+            if not b:
+                continue
             try:
-                if addr == ipaddress.ip_address(b):
+                if "/" in b:
+                    if addr in ipaddress.ip_network(b, strict=False):
+                        return True
+                elif addr == ipaddress.ip_address(b):
                     return True
             except ValueError:
                 continue
@@ -58,7 +64,9 @@ def resolve_host(host: str) -> List[str]:
         pass
     try:
         infos = socket.getaddrinfo(host, None)
-    except OSError:
+    except Exception:
+        # OSError (unresolvable) OR UnicodeError (bad IDNA label) etc. — fail
+        # CLOSED: an empty list makes check_egress refuse the request.
         return []
     out: List[str] = []
     for info in infos:

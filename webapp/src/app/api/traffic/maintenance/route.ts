@@ -31,6 +31,9 @@ export async function POST(request: NextRequest) {
     let retentionDeleted = 0
     for (const { userId } of distinctUsers) {
       const days = retMap.get(userId) ?? DEFAULT_RETENTION_DAYS
+      // Defensive: <= 0 means "keep forever" (never delete everything), even if a
+      // bad value slipped past the settings-write clamp.
+      if (!Number.isFinite(days) || days <= 0) continue
       const cutoff = new Date(now - days * DAY_MS)
       const r = await prisma.capturedHttpTransaction.deleteMany({
         where: { userId, startedAt: { lt: cutoff } },
