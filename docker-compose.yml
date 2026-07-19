@@ -860,6 +860,92 @@ services:
       - redamon
       - orchestrator-net
 
+  # ===========================================================================
+  # HTTP Traffic Capture (mitmproxy) — Phase 1. Both services build from
+  # capture_proxy/Dockerfile. Gated behind the `capture` profile so a plain
+  # `docker compose up` does NOT start them; the recon orchestrator manages the
+  # proxy lifecycle from the per-project toggle (§8.4). Build with:
+  #   docker compose --profile capture build capture-proxy
+  # Apply the scoped role once (capture_proxy/sql/001_traffic_ingest_role.sql).
+  # ===========================================================================
+  capture-proxy:
+    profiles: ["capture"]
+    build:
+      context: .
+      dockerfile: capture_proxy/Dockerfile
+    image: redamon-capture-proxy:latest
+    container_name: redamon-capture-proxy
+    # confdir=/ca keeps the mitmproxy CA (a forge-anything key, §15.9) on a
+    # restricted volume readable only by this container; the private key never
+    # leaves it. stream_large_bodies bounds memory on huge responses.
+    command: ["mitmdump","--quiet","--set","confdir=/ca","--set","stream_large_bodies=5m","--listen-port","8888","-s","/app/capture_addon.py"]
+    environment:
+      CAPTURE_SPOOL_DIR: /spool
+      CAPTURE_BODIES_DIR: /bodies
+      CAPTURE_PROXY_MAX_BODY_KB: "${CAPTURE_PROXY_MAX_BODY_KB:-64}"
+      CAPTURE_PROXY_STORE_BODIES: "${CAPTURE_PROXY_STORE_BODIES:-true}"
+      # Extra RedAmon service IPs the proxy must never reach (defense in depth on
+      # top of the RFC1918/loopback denylist; pentest-net placement already blocks).
+      CAPTURE_BLOCKED_IPS: "${CAPTURE_BLOCKED_IPS:-}"
+    # Target-facing plane ONLY. No redamon-network -> structurally cannot reach
+    # Postgres/Neo4j/agent/webapp/orchestrator. Holds NO DB creds, NO signing key.
+    networks:
+      - pentest-net
+    ports:
+      # Loopback publish so host-net recon containers reach it at 127.0.0.1:<port>.
+      - "127.0.0.1:${CAPTURE_PROXY_PORT:-8888}:8888"
+    volumes:
+      - capture_spool:/spool
+      - capture_bodies:/bodies
+      - capture_ca:/ca
+    # §15.10: non-root image user, no caps, no privesc, read-only root fs.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${CAPTURE_PROXY_MEM:-384m}
+    pids_limit: 256
+    restart: "no"
+
+  traffic-ingest:
+    profiles: ["capture"]
+    build:
+      context: .
+      dockerfile: capture_proxy/Dockerfile
+    image: redamon-capture-proxy:latest
+    container_name: redamon-traffic-ingest
+    command: ["python","/app/ingest_worker.py"]
+    environment:
+      CAPTURE_SPOOL_DIR: /spool
+      CAPTURE_BODIES_DIR: /bodies
+      CAPTURE_PROXY_REDACT_SECRETS: "${CAPTURE_PROXY_REDACT_SECRETS:-true}"
+      CAPTURE_REDACT_SALT: "${CAPTURE_REDACT_SALT:-redamon-capture}"
+      # Scoped INSERT-only role (capture_proxy/sql/001_traffic_ingest_role.sql).
+      TRAFFIC_INGEST_DATABASE_URL: "${TRAFFIC_INGEST_DATABASE_URL:-postgresql://traffic_ingest:changeme@postgres:5432/${POSTGRES_DB:-redamon}}"
+      # Tag-verification keys: source=recon -> SCANNER_API_KEY, source=agent -> INTERNAL_API_KEY.
+      SCANNER_API_KEY: "${SCANNER_API_KEY:-}"
+      INTERNAL_API_KEY: "${INTERNAL_API_KEY:-}"
+    # Trusted plane: needs Postgres. NO pentest-net -> no target egress at all.
+    networks:
+      - redamon
+    volumes:
+      - capture_spool:/spool
+      - capture_bodies:/bodies
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${TRAFFIC_INGEST_MEM:-256m}
+    pids_limit: 256
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
 # =============================================================================
 # Networks
 # =============================================================================
@@ -952,3 +1038,12 @@ volumes:
     name: redamon_cypherfix_work
   redamon_broker_socket:  # Holds the docker-broker filtered socket; in-VM so it is shareable on macOS + Linux
     name: redamon_broker_socket
+  # HTTP traffic capture (Phase 1): the append-only spool (proxy writes, ingest
+  # drains), the content-addressed body store (deduped blobs), and the proxy's
+  # restricted mitmproxy CA dir (private key never leaves the proxy, §15.9).
+  capture_spool:
+    name: redamon_capture_spool
+  capture_bodies:
+    name: redamon_capture_bodies
+  capture_ca:
+    name: redamon_capture_ca
