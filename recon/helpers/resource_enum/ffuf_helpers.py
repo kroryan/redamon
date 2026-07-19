@@ -40,7 +40,6 @@ def _fuzz_single_target(
     custom_headers: List[str],
     follow_redirects: bool,
     allowed_hosts: set,
-    use_proxy: bool,
 ) -> Tuple[List[Dict], List[Dict]]:
     """Run FFuf against a single fuzz target URL. Returns (results, external_entries)."""
     results = []
@@ -81,8 +80,12 @@ def _fuzz_single_target(
     for header in custom_headers:
         cmd.extend(["-H", header])
 
-    if use_proxy:
-        cmd.extend(["-x", "socks5://127.0.0.1:9050"])
+    # HTTP traffic capture (Phase 1): route through the capture proxy when
+    # enabled + reachable; tag added ONLY in this branch (§20.2 no-leak).
+    from helpers.proxy_routing import get_capture_routing
+    _cap_url, _cap_token = get_capture_routing("ffuf")
+    if _cap_url and _cap_token:
+        cmd.extend(["-x", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_token}"])
 
     cmd.extend(["-of", "json", "-o", output_file])
     cmd.extend(["-s"])  # Silent mode (no banner/progress)
@@ -159,7 +162,6 @@ def run_ffuf_discovery(
     follow_redirects: bool,
     allowed_hosts: set,
     discovered_base_paths: Optional[List[str]] = None,
-    use_proxy: bool = False,
     parallelism: int = 3,
 ) -> Tuple[List[Dict], Dict]:
     """
@@ -186,7 +188,6 @@ def run_ffuf_discovery(
         follow_redirects: Follow HTTP redirects
         allowed_hosts: Set of in-scope hostnames
         discovered_base_paths: Base paths discovered by crawlers to fuzz under
-        use_proxy: Whether to use Tor proxy
 
     Returns:
         Tuple of (results_list, {"external_domains": [...]})
@@ -229,7 +230,7 @@ def run_ffuf_discovery(
                     timeout, max_time, rate, match_codes, filter_codes,
                     filter_size, extensions, recursion, recursion_depth,
                     auto_calibrate, custom_headers, follow_redirects,
-                    allowed_hosts, use_proxy
+                    allowed_hosts
                 )
                 futures[future] = fuzz_url
 

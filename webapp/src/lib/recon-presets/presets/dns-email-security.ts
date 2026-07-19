@@ -47,7 +47,6 @@ Security teams auditing email spoofing defenses (SPF, DMARC, DKIM), DNS administ
     scanModules: ['domain_discovery', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: ALL tools, max results, aggressive ---
     subdomainDiscoveryEnabled: true,

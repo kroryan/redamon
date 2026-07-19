@@ -42,7 +42,6 @@ def run_subdomain_discovery(config: dict) -> None:
     print(f"[*][Partial Recon] Running subdomain discovery tools...")
     result = discover_subdomains(
         domain=domain,
-        anonymous=settings.get("USE_TOR_FOR_RECON", False),
         bruteforce=settings.get("USE_BRUTEFORCE_FOR_SUBDOMAINS", False),
         resolve=True,
         save_output=False,  # Don't save intermediate JSON

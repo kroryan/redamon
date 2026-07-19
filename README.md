@@ -23,7 +23,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v6.0.3-release-2E8B57?style=flat" alt="Version 6.0.3"/>
+  <img height="24" src="https://img.shields.io/badge/v6.1.0-release-2E8B57?style=flat" alt="Version 6.1.0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <a href="readmes/README.SECURITY_POSTURE.md"><img height="24" src="https://img.shields.io/badge/SECURE%20BY%20DESIGN-STRIDE%20THREAT%20MODELED-2E7D32?style=flat&logo=shield&logoColor=white" alt="Secure by Design, STRIDE Threat Modeled"/></a>
@@ -34,7 +34,7 @@
   <a href="redamon.wiki/Deploying-to-a-Server.md"><img height="24" src="https://img.shields.io/badge/%F0%9F%9A%80%20ONE%20COMMAND-DEPLOY%20ON%20SERVER-CC7722?style=flat" alt="One Command Deploy on Server"/></a>
   <img height="24" src="https://img.shields.io/badge/Kali-Powered-466A7A?style=flat&logo=kalilinux&logoColor=white" alt="Kali Powered"/>
   <img height="24" src="https://img.shields.io/badge/Docker-Compose-1A7EC2?style=flat&logo=docker&logoColor=white" alt="Docker"/>
-  <img height="24" src="https://img.shields.io/badge/IP%2FCIDR-TARGETING-0D7377?style=flat" alt="IP/CIDR Targeting"/>
+  <a href="https://github.com/samugit83/redamon/wiki/TrafficMind"><img height="24" src="https://img.shields.io/badge/%F0%9F%95%B8%EF%B8%8F%20TRAFFICMIND-mitmproxy%20CAPTURE-1F6FEB?style=flat" alt="TrafficMind mitmproxy HTTP Capture"/></a>
   <img height="24" src="https://img.shields.io/badge/100+-SECURITY%20TOOLS-CC8F00?style=flat&logo=hack-the-box&logoColor=white" alt="100+ Security Tools"/>
   <img height="24" src="https://img.shields.io/badge/185,000+-DETECTION%20RULES-8B1142?style=flat" alt="185,000+ Detection Rules"/>
   <img height="24" src="https://img.shields.io/badge/500+-PROJECT%20SETTINGS-00899B?style=flat" alt="500+ Settings"/>
@@ -44,7 +44,6 @@
   <img height="24" src="https://img.shields.io/badge/OpenVAS-Scanner-66B245?style=flat" alt="OpenVAS Scanner"/>
   <img height="24" src="https://img.shields.io/badge/Nmap-Scanner-4682B4?style=flat" alt="Nmap Scanner"/>
   <img height="24" src="https://img.shields.io/badge/Nuclei-Scanner-7B42BC?style=flat" alt="Nuclei Scanner"/>
-  <img height="24" src="https://img.shields.io/badge/SQLMap-Injection-C0392B?style=flat" alt="SQLMap"/>
   <img height="24" src="https://img.shields.io/badge/Hydra-Credential%20Testing-E67E22?style=flat" alt="Hydra Credential Testing"/>
   <img height="24" src="https://img.shields.io/badge/CypherFix-Auto%20Remediation-00B894?style=flat" alt="CypherFix Auto Remediation"/>
   <img height="24" src="https://img.shields.io/badge/AI-PENTEST%20REPORTS-8B5CF6?style=flat" alt="AI Pentest Reports"/>
@@ -591,6 +590,16 @@ A **LangGraph-based autonomous agent** implementing the ReAct pattern. It progre
 | | **execute_hydra** | THC Hydra brute force -- 50+ protocols (SSH, FTP, RDP, SMB, HTTP, MySQL, etc.) | Exploit, Post | network_recon :8000 |
 | **Code Execution** | **kali_shell** | Full Kali Linux shell -- nikto, whatweb, testssl, commix, sstimap, tplmap, ysoserial, phpggc, dnsrecon, dnsx, subzy, enum4linux-ng, netexec, kerbrute, bloodhound-python, bhgraph, certipy-ad, bloodyAD, jwt_tool, graphql-cop, graphqlmap, gitleaks, semgrep, hashcat, john, cewl, paramspider, Node.js + npm, Python libs (websockets, zeep, python3-saml, boto3, msal, azure-identity, google-auth, google-cloud-storage), pre-staged post-exploit toolkits at /opt/tools/{linux,windows}/ (linpeas, LinEnum, pspy64, deepce, winPEAS, PowerUp, PrivescCheck), and 70+ CLI tools | All | network_recon :8000 |
 | | **execute_code** | Write and run code files (Python, bash, Ruby, Perl, C, C++) -- no shell escaping | Exploit, Post | network_recon :8000 |
+| **Traffic (TrafficMind)** | **proxy_search** | Burp-style history over the captured HTTP corpus -- summaries only, same filters as the UI (host, method, status, tool, source, `q` URL / `bodyq` body substring, reflected, only5xx) | All | -- (in-process) |
+| | **proxy_get** | Full request or response (headers + body) for one captured transaction | All | -- (in-process) |
+| | **proxy_sitemap** | Distinct endpoints observed (host + path + method) with hit counts and status codes | All | -- (in-process) |
+| | **proxy_params** | Distinct request parameters with sample values and an injectability heuristic (sequential-id / uuid / jwt / base64) | All | -- (in-process) |
+| | **proxy_grep** | Case-insensitive substring search across captured response bodies, with a snippet around the first match | All | -- (in-process) |
+| | **proxy_diff** | Structural diff of two responses (status, length, header set, body unified-diff) for boolean-blind SQLi / IDOR / auth-bypass detection | All | -- (in-process) |
+| | **proxy_to_curl** | Render a captured request as a reproducible `curl` command (read-only, sends nothing) | All | -- (in-process) |
+| | **proxy_query** | Constrained analytical query builder over allowlisted columns / aggregations (JSON spec only, no raw SQL) | All | -- (in-process) |
+| | **proxy_replay** | **DANGEROUS** -- resend a captured request with fields mutated (method / path / query / params / headers / cookie / body); host, scheme, port pinned to the origin. Auth-context swap for IDOR / BOLA / privesc. Re-captured as an `isReplay` transaction | Exploit, Post | network_recon :8000 |
+| | **proxy_fuzz** | **DANGEROUS** -- Burp-Intruder style: replay one captured request iterating a payload set (capped at 50) over a query param, returns a per-payload status / length summary | Exploit, Post | network_recon :8000 |
 | **Workspace FS** | **fs_read** | Read workspace file with line numbers, auto-detects binary, stores snapshot for `fs_diff vs_last_read` | All | -- (in-process) |
 | | **fs_read_many** | Batched read of multiple files, capped at `max_total_bytes` (default 200 KB) | All | -- (in-process) |
 | | **fs_stat** | Metadata only -- size, mtime, mode, type, optional SHA-256 | All | -- (in-process) |
@@ -676,6 +685,16 @@ A persistent, evolutionary graph tracking everything the AI agent does: tool exe
 Launch **multiple concurrent agent sessions** against the same project. Each session creates its own AttackChain in EvoGraph. New sessions automatically load findings and failure lessons from all prior sessions, avoiding redundant work.
 
 > **[Wiki: AI Agent Guide](https://github.com/samugit83/redamon/wiki/AI-Agent-Guide)**
+
+### TrafficMind: HTTP Traffic Capture
+
+RedAmon's built-in, engagement-scoped **proxy history**: a credential-free man-in-the-middle proxy (powered by **mitmproxy**) sits between every offensive tool and its target, records the full request/response of each HTTP transaction, tags it with *who* produced it (project / user / run / tool via a signed HMAC context tag), and stores it in Postgres through a trusted, INSERT-only ingest worker. Think Burp Suite's HTTP history, except it turns on with a toggle, attributes every request to its source, and is queryable by the operator **and** the AI agent.
+
+Capture is **off by default** and gated at two levels (a global master switch that runs the proxy, plus a per-project routing toggle). Eight recon tools and eight agent HTTP tools (`execute_curl`, `execute_httpx`, `execute_playwright`, `execute_nuclei`, `execute_katana`, `execute_ffuf`, `execute_arjun`, `execute_wpscan`) are routed, so both the pipeline's and the agent's own crawl/fuzz/scan traffic is captured, searchable, and replayable. The proxy holds no secrets, an SSRF egress guard with a DNS-rebinding IP pin keeps it from pivoting into internal infrastructure, sensitive headers are redacted, and passive signals (reflected params, missing security headers, cookie-flag issues) are computed for free on every response. A **TrafficMind** view in the top navigation exposes the corpus as a paginated, filterable, Burp-style table with a request/response detail drawer, CSV/JSON export, and reference-counted body cleanup.
+
+The agent works the corpus through **ten `proxy_*` tools**: eight read-only analysis tools (`proxy_search`, `proxy_get`, `proxy_sitemap`, `proxy_params`, `proxy_grep`, `proxy_diff`, `proxy_to_curl`, `proxy_query`) and two active tools (`proxy_replay`, `proxy_fuzz`) that resend or Intruder-style fuzz a captured request. All ten are strictly tenant-scoped; the active tools are host-pinned to their origin, danger-flagged, phase-gated, and stealth-restricted.
+
+> **[Wiki: TrafficMind](https://github.com/samugit83/redamon/wiki/TrafficMind)** | **[Technical: README.TRAFFIC.md](readmes/README.TRAFFIC.md)**
 
 ### Reverse Shells
 

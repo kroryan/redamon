@@ -27,7 +27,12 @@ DEV_COMPOSE="-f docker-compose.yml -f docker-compose.dev.yml"
 #   - AI Attack Surface scan containers:  redamon-ai-attack-<proj>-<run>
 #   - On-demand local LLM (Ollama) judge/attacker:  redamon-local-llm
 #   - CodeFix build sandboxes (T6/E10):  redamon-codefix-<job>
-SPAWNED_CONTAINER_NAME_FILTERS=(--filter "name=redamon-ai-attack-" --filter "name=redamon-local-llm" --filter "name=redamon-codefix-")
+# Orchestrator-spawned, NON-compose-managed containers (repeated name filters are
+# OR'd by docker ps). Includes the capture proxy + ingest pair: they are spawned by
+# the orchestrator with restart:unless-stopped and live in the "capture" profile, so
+# `docker compose down` (no --profile capture) would NOT stop them and they would
+# leak past down/clean/purge — and hold the capture_* volumes purge tries to drop.
+SPAWNED_CONTAINER_NAME_FILTERS=(--filter "name=redamon-ai-attack-" --filter "name=redamon-local-llm" --filter "name=redamon-codefix-" --filter "name=redamon-capture-proxy" --filter "name=redamon-traffic-ingest")
 # The on-demand local LLM image (pulled at runtime, not built) + its models volume.
 LOCAL_LLM_IMAGE="${LOCAL_LLM_IMAGE:-ollama/ollama:latest}"
 LOCAL_LLM_VOLUME="${LOCAL_LLM_VOLUME:-redamon_llm_models}"
@@ -405,6 +410,62 @@ compose_build() {
     fi
 }
 
+# Best-effort POST to the orchestrator capture-proxy/start (idempotent reconcile:
+# removes any stale instance, (re)spawns proxy + ingest on the current image using
+# the orchestrator's .env-derived runtime knobs). Returns non-zero if there is no
+# ORCHESTRATOR_API_KEY or the orchestrator is unreachable.
+_capture_start_post() {
+    local env_file="$SCRIPT_DIR/.env" okey="" port=""
+    okey="$(grep -E '^ORCHESTRATOR_API_KEY=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2-)"
+    port="$(grep -E '^RECON_ORCH_PORT=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2-)"
+    port="${port:-8010}"
+    [ -z "$okey" ] && return 1
+    curl -fsS -X POST "http://127.0.0.1:${port}/capture-proxy/start" \
+        -H "X-Orchestrator-Key: ${okey}" -H 'Content-Type: application/json' \
+        -o /dev/null 2>/dev/null
+}
+
+# True (0) if the HTTP Traffic Capture master switch is on for any user. The proxy
+# is a global singleton, so one enabled operator means it should run.
+_capture_master_switch_on() {
+    local v
+    v="$(docker compose exec -T postgres psql -U redamon -d redamon -tAc \
+        "SELECT bool_or(capture_proxy_enabled) FROM user_settings;" 2>/dev/null | tr -d '[:space:]')"
+    [ "$v" = "t" ]
+}
+
+# If the capture proxy is currently running, ask the orchestrator to recreate it so
+# a freshly-rebuilt redamon-capture-proxy:latest actually goes live — a running
+# container otherwise keeps the OLD image (security fixes to the addon / egress /
+# ingest / redaction would NOT apply until the next Settings toggle). Best-effort.
+# A UI-customised port/scope reverts to the .env defaults until the next Settings save.
+_reconcile_capture_if_running() {
+    docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^redamon-capture-proxy$' || return 0
+    info "Refreshing the running capture proxy onto the rebuilt image..."
+    if _capture_start_post; then
+        success "Capture proxy refreshed onto the new image."
+    else
+        warn "Could not refresh the running capture proxy (no ORCHESTRATOR_API_KEY or orchestrator unreachable); toggle HTTP Traffic Capture off/on in Settings to apply the update."
+    fi
+}
+
+# The capture proxy + ingest are orchestrator-spawned (NOT compose-managed), so a
+# stack restart / `up` leaves them down and nothing restarts them — recon then runs
+# DIRECT ("capture degraded") and silently captures nothing. If the master switch is
+# on, reconcile them here so capture survives a restart. Idempotent + best-effort;
+# retries briefly while the just-started orchestrator becomes reachable.
+ensure_capture_proxy_running() {
+    _capture_master_switch_on || return 0
+    docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^redamon-capture-proxy$' && return 0
+    info "HTTP Traffic Capture is enabled — starting the capture proxy..."
+    local i
+    for i in 1 2 3 4 5 6 7 8; do
+        if _capture_start_post; then success "Capture proxy started."; return 0; fi
+        sleep 3
+    done
+    warn "HTTP Traffic Capture is on but the capture proxy could not be started (orchestrator not ready or ORCHESTRATOR_API_KEY missing). Re-run ./redamon.sh up, or toggle it in Settings."
+}
+
 get_version() {
     if [[ -f "$VERSION_FILE" ]]; then
         cat "$VERSION_FILE" | tr -d '[:space:]'
@@ -518,6 +579,19 @@ ensure_auth_secrets() {
     if ! grep -q '^TUNNEL_AUTH_TOKEN=' "$env_file" 2>/dev/null; then
         echo "TUNNEL_AUTH_TOKEN=$(openssl rand -hex 32)" >> "$env_file"
         info "Generated TUNNEL_AUTH_TOKEN"
+    fi
+    # Scoped INSERT-only DSN for the HTTP-traffic-capture ingest worker. This is the
+    # SINGLE SOURCE OF TRUTH for the traffic_ingest password: the webapp entrypoint
+    # (scripts/apply-ingest-role.mjs) provisions the matching Postgres role from it
+    # on every boot, and the orchestrator hands it to the spawned ingest container.
+    # Without it the ingest gets an EMPTY DSN and every captured request is silently
+    # dropped. Append-if-absent + hex password (URL/SQL-safe, no encoding needed).
+    if ! grep -q '^TRAFFIC_INGEST_DATABASE_URL=' "$env_file" 2>/dev/null; then
+        local _ti_db
+        _ti_db="$(grep -E '^POSTGRES_DB=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2-)"
+        _ti_db="${_ti_db:-redamon}"
+        echo "TRAFFIC_INGEST_DATABASE_URL=postgresql://traffic_ingest:$(openssl rand -hex 32)@postgres:5432/${_ti_db}" >> "$env_file"
+        info "Generated TRAFFIC_INGEST_DATABASE_URL (capture ingest role)"
     fi
 }
 
@@ -1189,9 +1263,14 @@ cmd_install() {
     ensure_auth_secrets
     ensure_db_secrets
 
-    # Build all images (tools + core services)
+    # Build all images (tools + core services + the on-demand capture proxy).
+    # The capture-proxy / traffic-ingest pair lives in the "capture" profile and is
+    # spawned on demand by the orchestrator (never by `up`), but its image
+    # (redamon-capture-proxy:latest) must still EXIST or the first Settings toggle
+    # fails with an image-not-found pull error. Building it here — alongside tools —
+    # guarantees a fresh install can start capture without any extra step.
     info "Building all images (this may take a while on first run)..."
-    compose_build --profile tools build
+    compose_build --profile tools --profile capture build
 
     # Pull GVM images with retry (large images, unreliable registry)
     if [[ "$gvm_mode" == "true" ]]; then
@@ -1218,6 +1297,10 @@ cmd_install() {
 
     # Ensure an admin user exists (prompts if none found)
     ensure_admin
+
+    # HTTP Traffic Capture: start the orchestrator-spawned proxy if the master
+    # switch is on (it is not compose-managed, so `up`/restart won't bring it back).
+    ensure_capture_proxy_running
 
     # Bootstrap the Knowledge Base if enabled (reads KB_ENABLED from kb_config.yaml).
     # Install always runs a fresh bootstrap -- first-time setup populates FAISS +
@@ -1401,6 +1484,17 @@ cmd_update() {
     if echo "$changed_files" | grep -q "^codefix_sandbox/"; then
         rebuild_tools+=(codefix-sandbox)
     fi
+    # capture-proxy / traffic-ingest (HTTP Traffic Capture): both share the
+    # redamon-capture-proxy:latest image, built from capture_proxy/. It is in the
+    # "capture" profile — never started by `up`, but SPAWNED on demand by the
+    # orchestrator, which just runs the image (no on-demand build; capture_proxy/ is
+    # not mounted into the orchestrator). So `update` MUST rebuild it here or the
+    # proxy would keep serving stale capture/ingest/redaction/egress code. Handled
+    # separately from rebuild_tools because it needs its own profile flag to build.
+    local rebuild_capture=false
+    if echo "$changed_files" | grep -q "^capture_proxy/"; then
+        rebuild_capture=true
+    fi
 
     # Export version for build arg
     export_version
@@ -1422,6 +1516,17 @@ cmd_update() {
         info "Rebuilding tool images: ${rebuild_tools[*]}"
         if ! compose_build --profile tools build "${rebuild_tools[@]}"; then
             warn "One or more tool images failed to build (${rebuild_tools[*]}); continuing with the core update. Re-run the build later: docker compose --profile tools build ${rebuild_tools[*]}"
+        fi
+    fi
+
+    # Rebuild the capture-proxy image if its source changed, then refresh a running
+    # proxy onto it. Build-only + best-effort: a failure must not abort the update.
+    if [[ "$rebuild_capture" == "true" ]]; then
+        info "Rebuilding capture proxy image (redamon-capture-proxy:latest)..."
+        if ! compose_build --profile capture build capture-proxy; then
+            warn "capture-proxy image failed to build; the existing image keeps working. Re-run later: docker compose --profile capture build capture-proxy"
+        else
+            _reconcile_capture_if_running
         fi
     fi
 
@@ -1487,6 +1592,10 @@ cmd_update() {
 
     # Ensure an admin user exists (prompts if none found)
     ensure_admin
+
+    # HTTP Traffic Capture: restore the proxy if the master switch is on (a stack
+    # recreate during update leaves the orchestrator-spawned pair down).
+    ensure_capture_proxy_running
 }
 
 ensure_tool_images() {
@@ -1540,6 +1649,10 @@ cmd_up_dev() {
 
     # Ensure an admin user exists (prompts if none found)
     ensure_admin
+
+    # HTTP Traffic Capture: start the orchestrator-spawned proxy if the master
+    # switch is on (it is not compose-managed, so `up`/restart won't bring it back).
+    ensure_capture_proxy_running
 
     # Refresh the Knowledge Base if enabled (behavior B -- always run ingest,
     # trust manifest dedup). Same rationale as cmd_up. Dev mode still benefits
@@ -1604,6 +1717,10 @@ cmd_up() {
 
     # Ensure an admin user exists (prompts if none found)
     ensure_admin
+
+    # HTTP Traffic Capture: start the orchestrator-spawned proxy if the master
+    # switch is on (it is not compose-managed, so `up`/restart won't bring it back).
+    ensure_capture_proxy_running
 
     # Refresh the Knowledge Base if enabled. Behavior B: always run the ingest
     # pipeline on up. The two-layer dedup (file hashes + manifest) skips

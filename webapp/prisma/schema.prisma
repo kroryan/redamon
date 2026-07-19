@@ -15,6 +15,7 @@ model User {
   role          String            @default("standard")
   projects      Project[]
   conversations Conversation[]
+  capturedHttpTransactions CapturedHttpTransaction[]
   llmProviders  UserLlmProvider[]
   attackSkills  UserAttackSkill[]
   chatSkills      UserChatSkill[]
@@ -125,6 +126,21 @@ model UserSettings {
   // User-managed MCP servers (UI-driven, see /settings/mcp)
   mcpServers      Json     @default("[]") @map("mcp_servers")
 
+  // HTTP Traffic Capture (mitmproxy, Phase 1) — GLOBAL capability switch + config.
+  // ON by default: the proxy + ingest containers are meant to run out of the box;
+  // flipping this drives the orchestrator capture-proxy/{start,stop}. The operator
+  // can still disable it here. This is distinct from Project.captureProxyEnabled,
+  // which is the per-project ROUTING gate (whether that project's traffic is sent
+  // through the proxy). Container-config below shapes the spawned proxy/ingest.
+  captureProxyEnabled       Boolean @default(true)  @map("capture_proxy_enabled")
+  captureProxyPort          Int     @default(8888)  @map("capture_proxy_port")
+  captureProxyScope         String  @default("both") @map("capture_proxy_scope")   // recon | agent | both
+  captureProxyStoreBodies   Boolean @default(true)  @map("capture_proxy_store_bodies")
+  captureProxyMaxBodyKb     Int     @default(64)    @map("capture_proxy_max_body_kb")
+  captureProxyRetentionDays Int     @default(14)    @map("capture_proxy_retention_days")
+  captureProxyRedactSecrets Boolean @default(true)  @map("capture_proxy_redact_secrets")
+  captureProxyPassiveDetect Boolean @default(true)  @map("capture_proxy_passive_detect")
+
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -219,6 +235,7 @@ model Project {
 
   conversations               Conversation[]
   graphViews                  GraphView[]
+  capturedHttpTransactions    CapturedHttpTransaction[]
 
   // ========== TARGET CONFIGURATION ==========
   targetDomain                String   @default("") @map("target_domain")
@@ -239,7 +256,6 @@ model Project {
   // ========== SCAN MODULES ==========
   scanModules                 String[] @default(["domain_discovery", "port_scan", "http_probe", "resource_enum", "vuln_scan"]) @map("scan_modules")
   updateGraphDb               Boolean  @default(true) @map("update_graph_db")
-  useTorForRecon              Boolean  @default(false) @map("use_tor_for_recon")
   useBruteforceForSubdomains  Boolean  @default(false) @map("use_bruteforce_for_subdomains")
 
   // ========== WHOIS/DNS ==========
@@ -776,7 +792,7 @@ model Project {
   agentCreateGraphImageOnInit           Boolean  @default(false) @map("agent_create_graph_image_on_init")
   agentLogMaxMb                         Int      @default(10) @map("agent_log_max_mb")
   agentLogBackupCount                   Int      @default(5) @map("agent_log_backup_count")
-  agentToolPhaseMap                     Json     @default("{\"query_graph\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"web_search\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"cve_intel\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"shodan\":[\"informational\",\"exploitation\"],\"google_dork\":[\"informational\"],\"execute_curl\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_naabu\":[\"informational\",\"exploitation\"],\"execute_httpx\":[\"informational\",\"exploitation\"],\"execute_subfinder\":[\"informational\",\"exploitation\"],\"execute_wpscan\":[\"informational\",\"exploitation\"],\"execute_jsluice\":[\"informational\",\"exploitation\"],\"execute_amass\":[\"informational\",\"exploitation\"],\"execute_katana\":[\"informational\",\"exploitation\"],\"execute_arjun\":[\"informational\",\"exploitation\"],\"execute_ffuf\":[\"informational\",\"exploitation\"],\"execute_gau\":[\"informational\",\"exploitation\"],\"execute_nmap\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_nuclei\":[\"informational\",\"exploitation\"],\"kali_shell\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_code\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_playwright\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_hydra\":[\"exploitation\",\"post_exploitation\"],\"metasploit_console\":[\"exploitation\",\"post_exploitation\"],\"msf_restart\":[\"exploitation\",\"post_exploitation\"],\"tradecraft_lookup\":[\"exploitation\",\"post_exploitation\"]}") @map("agent_tool_phase_map")
+  agentToolPhaseMap                     Json     @default("{\"query_graph\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"proxy_search\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"proxy_get\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"proxy_sitemap\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"proxy_params\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"proxy_grep\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"proxy_diff\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"proxy_to_curl\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"proxy_query\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"proxy_replay\":[\"exploitation\",\"post_exploitation\"],\"proxy_fuzz\":[\"exploitation\",\"post_exploitation\"],\"web_search\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"cve_intel\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"shodan\":[\"informational\",\"exploitation\"],\"google_dork\":[\"informational\"],\"execute_curl\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_naabu\":[\"informational\",\"exploitation\"],\"execute_httpx\":[\"informational\",\"exploitation\"],\"execute_subfinder\":[\"informational\",\"exploitation\"],\"execute_wpscan\":[\"informational\",\"exploitation\"],\"execute_jsluice\":[\"informational\",\"exploitation\"],\"execute_amass\":[\"informational\",\"exploitation\"],\"execute_katana\":[\"informational\",\"exploitation\"],\"execute_arjun\":[\"informational\",\"exploitation\"],\"execute_ffuf\":[\"informational\",\"exploitation\"],\"execute_gau\":[\"informational\",\"exploitation\"],\"execute_nmap\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_nuclei\":[\"informational\",\"exploitation\"],\"kali_shell\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_code\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_playwright\":[\"informational\",\"exploitation\",\"post_exploitation\"],\"execute_hydra\":[\"exploitation\",\"post_exploitation\"],\"metasploit_console\":[\"exploitation\",\"post_exploitation\"],\"msf_restart\":[\"exploitation\",\"post_exploitation\"],\"tradecraft_lookup\":[\"exploitation\",\"post_exploitation\"]}") @map("agent_tool_phase_map")
   agentKaliInstallEnabled               Boolean  @default(false) @map("agent_kali_install_enabled")
   agentKaliInstallAllowedPackages       String   @default("") @map("agent_kali_install_allowed_packages")
   agentKaliInstallForbiddenPackages     String   @default("") @map("agent_kali_install_forbidden_packages")
@@ -988,6 +1004,12 @@ model Project {
   // --- Free-Text ---
   roeNotes                    String   @default("") @map("roe_notes") @db.Text
 
+  // ========== HTTP TRAFFIC CAPTURE (mitmproxy) ==========
+  // Per-project routing gate for the capture layer. Off by default: no bodies
+  // are retained and nothing is written to captured_http_transactions. Mirrors
+  // the other per-project enable flags (webCachePoisonEnabled / zapAjaxSpiderEnabled).
+  captureProxyEnabled         Boolean  @default(false) @map("capture_proxy_enabled")
+
   remediations                      Remediation[]
   reports                           Report[]
 
@@ -1017,6 +1039,103 @@ model Conversation {
 
   @@index([projectId, userId])
   @@map("conversations")
+}
+
+// ========== Captured HTTP Traffic (mitmproxy integration, Phase 0+) ==========
+// Every HTTP(S) transaction generated by recon or the agent, tagged with its
+// exact source. Dual-scoped per user + project exactly like Conversation.
+// Phase 0 populates it from recon httpx bodies (via the scanner-authenticated
+// /api/traffic/[projectId]/ingest route); later phases add the capture proxy,
+// the agent tools, and Neo4j correlation. Reads are guardProject-gated (404
+// anti-enum); the writer stamps user_id/project_id from a trusted source, never
+// from client input.
+model CapturedHttpTransaction {
+  id        String @id @default(cuid())
+
+  // Tenant enforcement (mirror Conversation dual-key)
+  projectId String  @map("project_id")
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String  @map("user_id")
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Source attribution
+  source    String  @map("source")                    // 'recon' | 'agent'
+  runId     String? @map("run_id")                     // recon run / partial / ai-attack id
+  sessionId String? @map("session_id")                 // agent session -> Conversation.sessionId
+  memberId  String? @map("member_id")                  // fireteam sub-agent, optional
+  tool      String? @map("tool")                       // httpx|katana|nuclei|curl|playwright|...
+  phase     String? @map("phase")                      // recon phase or agent phase
+  stepId    String? @map("step_id")                    // agent step surrogate
+
+  // Request
+  method         String  @map("method")
+  scheme         String  @map("scheme")
+  host           String  @map("host")
+  port           Int     @map("port")
+  path           String  @map("path")                  @db.Text
+  query          String? @map("query")                 @db.Text
+  reqHeaders     Json    @map("req_headers")
+  reqBody        String? @map("req_body")              @db.Text     // inline if <= cap
+  reqBodyRef     String? @map("req_body_ref")          // sha256 -> disk if offloaded
+  reqBodySize    Int     @default(0) @map("req_body_size")
+  reqContentType String? @map("req_content_type")
+
+  // Response
+  statusCode      Int?    @map("status_code")
+  respHeaders     Json    @map("resp_headers")
+  respBody        String? @map("resp_body")            @db.Text
+  respBodyRef     String? @map("resp_body_ref")        // sha256 -> disk
+  respBodySize    Int     @default(0) @map("resp_body_size")
+  respContentType String? @map("resp_content_type")
+  reqBodySha      String? @map("req_body_sha256")      // request dedup / replay identity
+  respBodySha     String? @map("resp_body_sha256")
+  responseTimeMs  Int?    @map("response_time_ms")
+
+  // Network / protocol
+  targetIp    String? @map("target_ip")            // IP that actually served it
+  httpVersion String? @map("http_version")         // http/1.1 | h2 | h3 | ws
+  isTls       Boolean @default(false) @map("is_tls")
+  tlsVersion  String? @map("tls_version")
+  flowRef     String? @map("flow_ref")             // saved mitmproxy flow id -> byte-perfect replay
+
+  // Replay lineage (distinguish observed traffic from agent-induced traffic)
+  isReplay Boolean @default(false) @map("is_replay")
+  originId String? @map("origin_id")               // -> the transaction this was replayed from
+
+  // Scope / safety audit
+  inScope   Boolean @default(true)  @map("in_scope")
+  blocked   Boolean @default(false) @map("blocked")
+  errorText String? @map("error_text")
+
+  // Secret handling
+  redacted       Boolean @default(false) @map("redacted")
+  redactedFields Json?   @map("redacted_fields")
+
+  // Cheap passive signals stamped at capture time
+  hasSetCookie           Boolean @default(false) @map("has_set_cookie")
+  hadAuth                Boolean @default(false) @map("had_auth")
+  reflectedParams        Boolean @default(false) @map("reflected_params")
+  securityHeadersMissing Json?   @map("security_headers_missing")
+  cookieFlagIssues       Json?   @map("cookie_flag_issues")
+
+  // Analyst / agent tagging + finding cross-link (later phases)
+  labels    Json?   @map("labels")
+  findingId String? @map("finding_id")
+
+  startedAt DateTime @map("started_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([projectId, userId])
+  @@index([projectId, createdAt])
+  @@index([projectId, source])
+  @@index([projectId, host])
+  @@index([projectId, sessionId])
+  @@index([projectId, runId])
+  @@index([projectId, tool])
+  @@index([projectId, statusCode])
+  @@index([projectId, isReplay])
+  @@index([projectId, inScope])
+  @@map("captured_http_transactions")
 }
 
 model ChatMessage {

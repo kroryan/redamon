@@ -102,22 +102,12 @@ def run_paramspider(config: dict) -> None:
     PARAMSPIDER_PLACEHOLDER = settings.get('PARAMSPIDER_PLACEHOLDER', 'FUZZ')
     PARAMSPIDER_TIMEOUT = settings.get('PARAMSPIDER_TIMEOUT', 120)
 
-    use_proxy = False
-    try:
-        from recon.helpers import is_tor_running
-        TOR_ENABLED = settings.get('TOR_ENABLED', False)
-        if TOR_ENABLED and is_tor_running():
-            use_proxy = True
-    except Exception:
-        pass
-
     # Run ParamSpider discovery
     print(f"[*][Partial Recon] Running ParamSpider on {len(target_domains)} domains...")
     paramspider_urls, paramspider_urls_by_domain = run_paramspider_discovery(
         target_domains,
         PARAMSPIDER_PLACEHOLDER,
         PARAMSPIDER_TIMEOUT,
-        use_proxy,
     )
     print(f"[+][Partial Recon] ParamSpider discovered {len(paramspider_urls)} parameterized URLs")
 
@@ -332,15 +322,6 @@ def run_kiterunner(config: dict) -> None:
     KITERUNNER_METHOD_DETECT_THREADS = settings.get('KITERUNNER_METHOD_DETECT_THREADS', 20)
     GAU_VERIFY_DOCKER_IMAGE = settings.get('GAU_VERIFY_DOCKER_IMAGE', 'projectdiscovery/httpx:latest')
 
-    use_proxy = False
-    try:
-        from recon.helpers import is_tor_running
-        TOR_ENABLED = settings.get('TOR_ENABLED', False)
-        if TOR_ENABLED and is_tor_running():
-            use_proxy = True
-    except Exception:
-        pass
-
     # Ensure Kiterunner binary and run discovery for each wordlist
     kr_results = []
     for wordlist_name in KITERUNNER_WORDLISTS:
@@ -364,7 +345,6 @@ def run_kiterunner(config: dict) -> None:
                 KITERUNNER_MATCH_STATUS,
                 KITERUNNER_MIN_CONTENT_LENGTH,
                 KITERUNNER_HEADERS,
-                use_proxy,
             )
             # Merge results, avoiding duplicates
             existing_urls = {(r['url'], r['method']) for r in kr_results}
@@ -390,7 +370,6 @@ def run_kiterunner(config: dict) -> None:
             KITERUNNER_METHOD_DETECT_TIMEOUT,
             KITERUNNER_METHOD_DETECT_RATE_LIMIT,
             KITERUNNER_METHOD_DETECT_THREADS,
-            use_proxy,
         )
 
     # Merge Kiterunner results into by_base_url structure
@@ -670,15 +649,6 @@ def run_arjun(config: dict) -> None:
     ARJUN_DISABLE_REDIRECTS = settings.get('ARJUN_DISABLE_REDIRECTS', False)
     ARJUN_CUSTOM_HEADERS = settings.get('ARJUN_CUSTOM_HEADERS', [])
 
-    use_proxy = False
-    try:
-        from recon.helpers import is_tor_running
-        TOR_ENABLED = settings.get('TOR_ENABLED', False)
-        if TOR_ENABLED and is_tor_running():
-            use_proxy = True
-    except Exception:
-        pass
-
     # Run Arjun parameter discovery
     print(f"[*][Partial Recon] Running Arjun parameter discovery on {len(arjun_target_urls)} URLs...")
     arjun_results, arjun_meta = run_arjun_discovery(
@@ -694,7 +664,6 @@ def run_arjun(config: dict) -> None:
         ARJUN_DISABLE_REDIRECTS,
         ARJUN_CUSTOM_HEADERS,
         target_domains,
-        use_proxy,
     )
 
     # Merge Arjun results into by_base_url structure

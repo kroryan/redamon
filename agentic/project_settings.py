@@ -24,6 +24,8 @@ DANGEROUS_TOOLS = frozenset({
     'execute_code', 'execute_hydra', 'execute_playwright', 'execute_wpscan',
     'execute_arjun', 'execute_ffuf', 'execute_amass', 'execute_gau',
     'execute_katana',
+    # Active captured-traffic tools emit live target traffic (§10.4/§15.5).
+    'proxy_replay', 'proxy_fuzz',
 })
 
 # =============================================================================
@@ -50,6 +52,10 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     # once per session and bills subsequent reads at ~10% of base input cost.
     # Has no effect on non-Anthropic providers (gated by isinstance check).
     'ANTHROPIC_PROMPT_CACHING_ENABLED': True,
+
+    # HTTP Traffic Capture (mitmproxy, Phase 1) — per-project routing gate for
+    # the agent's target-facing tools (same flag recon reads).
+    'CAPTURE_PROXY_ENABLED': False,
 
     # Stealth Mode
     'STEALTH_MODE': False,
@@ -187,6 +193,19 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     # Tool Phase Restrictions
     'TOOL_PHASE_MAP': {
         'query_graph': ['informational', 'exploitation', 'post_exploitation'],
+        # Captured-traffic read/analyze tools (Phase 4 §10.4) — read-only over
+        # already-captured data, useful in every phase (like query_graph).
+        'proxy_search': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_get': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_sitemap': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_params': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_grep': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_diff': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_to_curl': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_query': ['informational', 'exploitation', 'post_exploitation'],
+        # Active traffic tools (dangerous — emit live traffic): exploitation+ only.
+        'proxy_replay': ['exploitation', 'post_exploitation'],
+        'proxy_fuzz': ['exploitation', 'post_exploitation'],
         'execute_curl': ['informational', 'exploitation', 'post_exploitation'],
         'execute_naabu': ['informational', 'exploitation'],
         'execute_httpx': ['informational', 'exploitation'],
@@ -410,6 +429,7 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['HYDRA_VERBOSE'] = project.get('hydraVerbose', DEFAULT_AGENT_SETTINGS['HYDRA_VERBOSE'])
     settings['HYDRA_MAX_WORDLIST_ATTEMPTS'] = project.get('hydraMaxWordlistAttempts', DEFAULT_AGENT_SETTINGS['HYDRA_MAX_WORDLIST_ATTEMPTS'])
     settings['SHODAN_ENABLED'] = project.get('shodanEnabled', DEFAULT_AGENT_SETTINGS['SHODAN_ENABLED'])
+    settings['CAPTURE_PROXY_ENABLED'] = project.get('captureProxyEnabled', DEFAULT_AGENT_SETTINGS['CAPTURE_PROXY_ENABLED'])
     settings['STEALTH_MODE'] = project.get('stealthMode', DEFAULT_AGENT_SETTINGS['STEALTH_MODE'])
     settings['AGENT_GUARDRAIL_ENABLED'] = project.get('agentGuardrailEnabled', DEFAULT_AGENT_SETTINGS['AGENT_GUARDRAIL_ENABLED'])
     # Fireteam (multi-agent)

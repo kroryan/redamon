@@ -61,6 +61,10 @@ print('classes:', re.findall(rb'[A-Za-z][A-Za-z0-9._\\$]+', b)[:40])
 
 Once at least one candidate sink is confirmed (a parameter that accepts a forged blob without immediately rejecting it, plus a known runtime), **request transition to exploitation phase**.
 
+### Captured-traffic workflow (proxy_* tools)
+
+When HTTP Traffic Capture is enabled, proxy_params and proxy_grep hunt captured cookies and parameters for opaque base64/hex blobs carrying deserializer magic prefixes (`rO0` for Java ObjectInputStream, `gASV`/`gAJ` for Python pickle, `O:` or `a:` for PHP serialized, `__VIEWSTATE` for .NET). proxy_replay then delivers a forged blob by swapping the body or cookie of a captured transaction (for example an Apache Shiro `rememberMe` cookie), recorded as a new replay txn. Where the proxy stops: gadget-chain forging (ysoserial/phpggc), Shiro key brute-force, the LDAP referral server, and OAST confirmation all stay offline/out-of-band; proxy_replay is pinned to the origin host.
+
 ### Phase 2: Exploitation
 
 Pick the per-language track that matches the runtime. Each track follows the same arc: build a blind oracle gadget, prove out-of-band that the bytes are deserialized, then upgrade to a command-execution gadget.

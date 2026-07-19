@@ -57,7 +57,6 @@ class TestIsSensitiveKey:
         "HTTPX_TIMEOUT",
         "VHOST_SNI_TEST_L7",
         "MAX_RESULTS",
-        "USE_TOR_FOR_RECON",
         "NUCLEI_BULK_SIZE",
     ])
     def test_doesnt_flag_innocent_keys(self, key):
@@ -265,7 +264,6 @@ class TestRealWorldShape:
             "NAABU_RATE_LIMIT": 1000,
             "NAABU_THREADS": 25,
             "NAABU_PASSIVE_MODE": False,
-            "USE_TOR_FOR_RECON": False,
         }
         out = _capture(
             print_effective_settings, "Naabu", settings,
@@ -277,11 +275,10 @@ class TestRealWorldShape:
                 ("NAABU_RATE_LIMIT", "Performance"),
                 ("NAABU_THREADS", "Performance"),
                 ("NAABU_PASSIVE_MODE", "Behavior"),
-                ("USE_TOR_FOR_RECON", "Anonymity"),
             ],
         )
         # All groups present
-        for group in ("Toggle", "Image", "Ports", "Performance", "Behavior", "Anonymity"):
+        for group in ("Toggle", "Image", "Ports", "Performance", "Behavior"):
             assert f"# {group}" in out
         # No credential leakage (none in this example, but good hygiene)
         assert "redacted" not in out

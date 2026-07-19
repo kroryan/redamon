@@ -65,7 +65,6 @@ from recon.helpers import (
     fix_file_ownership,
     pull_nuclei_docker_image,
     ensure_templates_volume,
-    is_tor_running,
     # Target extraction
     extract_targets_from_recon,
     build_target_urls,
@@ -210,7 +209,6 @@ def run_vuln_scan(recon_data: dict, output_file: Path = None, settings: dict = N
     WAF_AI_CLASSIFIER = settings.get('WAF_AI_CLASSIFIER', False)
     NUCLEI_AI_RESPONSE_FILTER = settings.get('NUCLEI_AI_RESPONSE_FILTER', False)
     AI_PIPELINE_MODEL = settings.get('AI_PIPELINE_MODEL', 'claude-opus-4-6')
-    USE_TOR_FOR_RECON = settings.get('USE_TOR_FOR_RECON', False)
     KATANA_DEPTH = settings.get('KATANA_DEPTH', 2)
     NUCLEI_AUTO_UPDATE_TEMPLATES = settings.get('NUCLEI_AUTO_UPDATE_TEMPLATES', True)
     CVE_LOOKUP_ENABLED = settings.get('CVE_LOOKUP_ENABLED', True)
@@ -348,7 +346,6 @@ def run_vuln_scan(recon_data: dict, output_file: Path = None, settings: dict = N
                 ("NVD_API_KEY", "CVE enrichment credentials"),
                 ("VULNERS_KEY_ROTATOR", "CVE enrichment credentials"),
                 ("NVD_KEY_ROTATOR", "CVE enrichment credentials"),
-                ("USE_TOR_FOR_RECON", "Anonymity"),
             ],
         )
 
@@ -377,17 +374,7 @@ def run_vuln_scan(recon_data: dict, output_file: Path = None, settings: dict = N
 
         print(f"[*][Nuclei] Nuclei Version: {nuclei_version}")
         print(f"[*][Nuclei] Templates Available: ~{template_count}")
-    
-        # Check Tor status
-        use_proxy = False
-        if USE_TOR_FOR_RECON:
-            if is_tor_running():
-                use_proxy = True
-                print(f"[*][Nuclei] ANONYMOUS MODE: Using Tor SOCKS proxy")
-            else:
-                print("[!][Nuclei] USE_TOR_FOR_RECON enabled but Tor not running")
-                print("[!][Nuclei] Falling back to direct scanning")
-    
+
         # Extract targets
         ips, hostnames, ip_to_hostnames = extract_targets_from_recon(recon_data)
     
@@ -591,7 +578,6 @@ def run_vuln_scan(recon_data: dict, output_file: Path = None, settings: dict = N
                     targets_file=detection_targets_file,
                     output_file=detection_output_file,
                     docker_image=NUCLEI_DOCKER_IMAGE,
-                    use_proxy=use_proxy,
                     severity=NUCLEI_SEVERITY,
                     templates=NUCLEI_TEMPLATES,
                     exclude_templates=NUCLEI_EXCLUDE_TEMPLATES,
@@ -625,7 +611,6 @@ def run_vuln_scan(recon_data: dict, output_file: Path = None, settings: dict = N
                     targets_file=dast_targets_file,
                     output_file=dast_output_file,
                     docker_image=NUCLEI_DOCKER_IMAGE,
-                    use_proxy=use_proxy,
                     severity=NUCLEI_SEVERITY,
                     rate_limit=NUCLEI_RATE_LIMIT,
                     bulk_size=NUCLEI_BULK_SIZE,
@@ -665,7 +650,7 @@ def run_vuln_scan(recon_data: dict, output_file: Path = None, settings: dict = N
                     "templates_available": template_count,
                     "execution_mode": "docker",
                     "docker_image": NUCLEI_DOCKER_IMAGE,
-                    "anonymous_mode": use_proxy,
+                    "anonymous_mode": False,
                     "severity_filter": NUCLEI_SEVERITY,
                     "tags_filter": NUCLEI_TAGS,
                     "tags_ai_selected": ai_tags_used,
@@ -794,8 +779,6 @@ def run_vuln_scan(recon_data: dict, output_file: Path = None, settings: dict = N
             print(f"[+][Nuclei] NUCLEI SCAN COMPLETE")
             print(f"[+][Nuclei] Duration: {duration:.2f} seconds")
             print(f"[+][Nuclei] Execution mode: DOCKER")
-            if use_proxy:
-                print(f"[+][Nuclei] Anonymous mode: YES (via Tor)")
             if do_dast_pass:
                 print(f"[+][Nuclei] URLs scanned: {len(target_urls)} (detection) + {len(dast_urls)} (DAST)")
             else:

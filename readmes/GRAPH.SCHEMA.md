@@ -102,7 +102,7 @@ The entry point for all queries. Contains project/user ownership.
     modules_executed: ["whois", "dns_resolution", "port_scan", "http_probe", "vuln_scan"],
     
     // Scan modes (from metadata)
-    anonymous_mode: false,                   // Was Tor used?
+    anonymous_mode: false,                   // Retained for compatibility; always false
     bruteforce_mode: false,                  // Was subdomain bruteforcing enabled?
     
     // WHOIS Information

@@ -145,18 +145,6 @@ export function ScanModulesSection({ data, updateField }: ScanModulesSectionProp
                 disabled
               />
             </div>
-            <div className={styles.toggleRow}>
-              <div>
-                <span className={styles.toggleLabel}>Use Tor for Recon</span>
-                <p className={styles.toggleDescription}>
-                  Route reconnaissance traffic through Tor network
-                </p>
-              </div>
-              <Toggle
-                checked={data.useTorForRecon}
-                onChange={(checked) => updateField('useTorForRecon', checked)}
-              />
-            </div>
           </div>
         </div>
       )}

@@ -148,15 +148,6 @@ def run_katana(config: dict) -> None:
     KATANA_CUSTOM_HEADERS = settings.get('KATANA_CUSTOM_HEADERS', [])
     KATANA_EXCLUDE_PATTERNS = settings.get('KATANA_EXCLUDE_PATTERNS', [])
 
-    use_proxy = False
-    try:
-        from recon.helpers import is_tor_running
-        TOR_ENABLED = settings.get('TOR_ENABLED', False)
-        if TOR_ENABLED and is_tor_running():
-            use_proxy = True
-    except Exception:
-        pass
-
     # Pull Docker image
     print(f"[*][Partial Recon] Pulling Katana Docker image: {KATANA_DOCKER_IMAGE}")
     pull_katana_docker_image(KATANA_DOCKER_IMAGE)
@@ -175,12 +166,11 @@ def run_katana(config: dict) -> None:
         target_domains,
         KATANA_CUSTOM_HEADERS,
         KATANA_EXCLUDE_PATTERNS,
-        use_proxy,
     )
     print(f"[+][Partial Recon] Katana found {len(katana_urls)} URLs")
 
     # Organize discovered URLs into by_base_url structure
-    organized_data = organize_endpoints(katana_urls, use_proxy=use_proxy)
+    organized_data = organize_endpoints(katana_urls)
 
     # Mark all endpoints with sources=['katana']
     for base_url, base_data in organized_data['by_base_url'].items():
@@ -416,15 +406,6 @@ def run_hakrawler(config: dict) -> None:
     HAKRAWLER_INSECURE = settings.get('HAKRAWLER_INSECURE', True)
     HAKRAWLER_CUSTOM_HEADERS = settings.get('HAKRAWLER_CUSTOM_HEADERS', [])
 
-    use_proxy = False
-    try:
-        from recon.helpers import is_tor_running
-        TOR_ENABLED = settings.get('TOR_ENABLED', False)
-        if TOR_ENABLED and is_tor_running():
-            use_proxy = True
-    except Exception:
-        pass
-
     # Pull Docker image
     print(f"[*][Partial Recon] Pulling Hakrawler Docker image: {HAKRAWLER_DOCKER_IMAGE}")
     pull_hakrawler_docker_image(HAKRAWLER_DOCKER_IMAGE)
@@ -443,12 +424,11 @@ def run_hakrawler(config: dict) -> None:
         target_domains,
         HAKRAWLER_CUSTOM_HEADERS,
         [],  # no exclude patterns for Hakrawler
-        use_proxy,
     )
     print(f"[+][Partial Recon] Hakrawler found {len(hakrawler_urls)} URLs")
 
     # Organize discovered URLs into by_base_url structure
-    organized_data = organize_endpoints(hakrawler_urls, use_proxy=use_proxy)
+    organized_data = organize_endpoints(hakrawler_urls)
 
     # Mark all endpoints with sources=['hakrawler']
     for base_url, base_data in organized_data['by_base_url'].items():
@@ -722,15 +702,6 @@ def run_zap_ajax_spider_partial(config: dict) -> None:
     ZAP_AJAX_SPIDER_MAX_URLS = settings.get("ZAP_AJAX_SPIDER_MAX_URLS", 1000)
     ZAP_AJAX_SPIDER_PARALLELISM = settings.get("ZAP_AJAX_SPIDER_PARALLELISM", 1)
 
-    use_proxy = False
-    try:
-        from recon.helpers import is_tor_running
-        TOR_ENABLED = settings.get("TOR_ENABLED", False)
-        if TOR_ENABLED and is_tor_running():
-            use_proxy = True
-    except Exception:
-        pass
-
     print(f"[*][ZAP Ajax] Docker image: {ZAP_AJAX_SPIDER_DOCKER_IMAGE}")
     print(f"[*][ZAP Ajax] Seed mode: {ZAP_AJAX_SPIDER_SEED_MODE}")
     print(f"[*][ZAP Ajax] Max duration: {ZAP_AJAX_SPIDER_MAX_DURATION} min")
@@ -799,7 +770,6 @@ def run_zap_ajax_spider_partial(config: dict) -> None:
         random_inputs=ZAP_AJAX_SPIDER_RANDOM_INPUTS,
         logout_avoidance=ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE,
         scope_check=ZAP_AJAX_SPIDER_SCOPE_CHECK,
-        use_proxy=use_proxy,
         parallelism=ZAP_AJAX_SPIDER_PARALLELISM,
     )
     print(f"[+][Partial Recon] ZAP Ajax Spider found {len(zap_ajax_urls)} URLs")
@@ -1050,16 +1020,6 @@ def run_ffuf(config: dict) -> None:
     print(f"[*][Partial Recon] FFuf rate limit: {FFUF_RATE} req/s" if FFUF_RATE > 0 else "[*][Partial Recon] FFuf rate limit: unlimited")
     print(f"[*][Partial Recon] FFuf timeout: {FFUF_TIMEOUT}s per request, {FFUF_MAX_TIME}s max")
 
-    # Check Tor proxy
-    use_proxy = False
-    try:
-        from recon.helpers import is_tor_running
-        TOR_ENABLED = settings.get('TOR_ENABLED', False)
-        if TOR_ENABLED and is_tor_running():
-            use_proxy = True
-    except Exception:
-        pass
-
     # Check ffuf binary
     if not pull_ffuf_binary_check():
         print("[!][Partial Recon] ffuf binary not found in PATH")
@@ -1136,7 +1096,6 @@ def run_ffuf(config: dict) -> None:
         FFUF_FOLLOW_REDIRECTS,
         target_domains,
         discovered_base_paths,
-        use_proxy,
         FFUF_PARALLELISM,
     )
     print(f"[+][Partial Recon] FFuf discovered {len(ffuf_results)} endpoints")
@@ -1364,15 +1323,6 @@ def run_gau(config: dict) -> None:
 
     URLSCAN_API_KEY = settings.get('URLSCAN_API_KEY', '')
 
-    use_proxy = False
-    try:
-        from recon.helpers import is_tor_running
-        TOR_ENABLED = settings.get('TOR_ENABLED', False)
-        if TOR_ENABLED and is_tor_running():
-            use_proxy = True
-    except Exception:
-        pass
-
     # Pull Docker image
     print(f"[*][Partial Recon] Pulling GAU Docker image: {GAU_DOCKER_IMAGE}")
     pull_gau_docker_image(GAU_DOCKER_IMAGE)
@@ -1389,7 +1339,6 @@ def run_gau(config: dict) -> None:
         GAU_MAX_URLS,
         GAU_YEAR_RANGE,
         GAU_VERBOSE,
-        use_proxy,
         URLSCAN_API_KEY,
     )
     print(f"[+][Partial Recon] GAU discovered {len(gau_urls)} total URLs")
@@ -1433,7 +1382,6 @@ def run_gau(config: dict) -> None:
             GAU_VERIFY_RATE_LIMIT,
             GAU_VERIFY_THREADS,
             GAU_VERIFY_ACCEPT_STATUS,
-            use_proxy,
         )
 
     # Detect HTTP methods
@@ -1447,7 +1395,6 @@ def run_gau(config: dict) -> None:
             GAU_METHOD_DETECT_TIMEOUT,
             GAU_METHOD_DETECT_RATE_LIMIT,
             GAU_FILTER_DEAD_ENDPOINTS,
-            use_proxy,
         )
 
     # Merge GAU URLs into by_base_url structure
@@ -1671,15 +1618,6 @@ def run_jsluice(config: dict) -> None:
         DEFAULT_JSLUICE_EXCLUDE_PATTERNS,
     ))
 
-    use_proxy = False
-    try:
-        from recon.helpers import is_tor_running
-        TOR_ENABLED = settings.get('TOR_ENABLED', False)
-        if TOR_ENABLED and is_tor_running():
-            use_proxy = True
-    except Exception:
-        pass
-
     # Run jsluice analysis (filters to .js files internally, downloads and analyzes)
     print(f"[*][Partial Recon] Running jsluice analysis...")
     JSLUICE_PARALLELISM = settings.get('JSLUICE_PARALLELISM', 3)
@@ -1692,7 +1630,6 @@ def run_jsluice(config: dict) -> None:
         JSLUICE_CONCURRENCY,
         JSLUICE_PARALLELISM,
         target_domains,
-        use_proxy,
     )
 
     jsluice_urls = jsluice_result.get("urls", [])
@@ -1720,7 +1657,6 @@ def run_jsluice(config: dict) -> None:
             JSLUICE_VERIFY_RATE_LIMIT,
             JSLUICE_VERIFY_ACCEPT_STATUS,
             JSLUICE_EXCLUDE_PATTERNS,
-            use_proxy,
         )
         jsluice_urls = sorted(verified_set)
         print(f"[+][Partial Recon] jsluice verification kept {len(jsluice_urls)}/{jsluice_urls_pre_verify_count} URLs")

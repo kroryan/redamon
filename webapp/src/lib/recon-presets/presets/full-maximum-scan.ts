@@ -37,7 +37,6 @@ Pentesters running a final comprehensive sweep on a target they have full author
 ### What it disables
 - Nothing. Every tool is enabled.
 - Stealth mode is OFF (contradicts maximum scanning)
-- Tor routing is OFF (would throttle throughput)
 
 ### How it works
 1. All subdomain discovery tools run in parallel with Amass active brute forcing
@@ -56,9 +55,8 @@ Pentesters running a final comprehensive sweep on a target they have full author
     // All 6 scan modules
     scanModules: ['domain_discovery', 'port_scan', 'http_probe', 'resource_enum', 'vuln_scan', 'js_recon'],
 
-    // No stealth, no Tor
+    // No stealth
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: everything maxed ---
     subdomainDiscoveryEnabled: true,

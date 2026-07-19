@@ -144,6 +144,17 @@ These scripts and binaries are downloaded into `/opt/tools/{linux,windows}/` and
 
 ---
 
+## HTTP Traffic Capture (TrafficMind)
+
+These libraries power **TrafficMind**, RedAmon's engagement-scoped HTTP capture layer (the credential-free man-in-the-middle capture proxy and its trusted ingest worker). Both are installed into the `redamon-capture-proxy` image (`capture_proxy/Dockerfile`).
+
+| Library | Purpose | License | Source Repository | How Used |
+|---------|---------|---------|-------------------|----------|
+| **mitmproxy** | Interactive TLS-capable HTTP/HTTPS intercepting proxy | MIT | https://github.com/mitmproxy/mitmproxy | Installed via `pip` (`mitmproxy~=11.1`) in `capture_proxy/Dockerfile`; run as `mitmdump -s capture_addon.py` on the target-facing network to intercept and record HTTP transactions |
+| **psycopg (psycopg[binary])** | PostgreSQL adapter for Python | LGPL-3.0 | https://github.com/psycopg/psycopg | Installed via `pip` (`psycopg[binary]~=3.2`) in `capture_proxy/Dockerfile`; used only by the trusted ingest worker (`capture_proxy/ingest_worker.py`) to INSERT captured transactions via a scoped, insert-only database role |
+
+---
+
 ## Vulnerability Assessment (GVM/OpenVAS)
 
 | Tool | Purpose | License | Source Repository | How Used |
@@ -185,12 +196,10 @@ The judge/grader model and promptfoo's dataset plugins are **downloaded at scan 
 
 ---
 
-## Anonymity & Tunneling
+## Tunneling
 
 | Tool | Purpose | License | Source Repository | How Used |
 |------|---------|---------|-------------------|----------|
-| **Tor** | Anonymous network routing (optional) | BSD-3-Clause | https://gitlab.torproject.org/tpo/core/tor | Installed via `apt-get` in `recon/Dockerfile` |
-| **Proxychains4** | SOCKS proxy chaining | LGPL-2.1+ | https://github.com/rofl0r/proxychains-ng | Installed via `apt-get` in `recon/Dockerfile` |
 | **Ngrok** | TCP tunneling for reverse shells (optional) | Proprietary (free tier) | https://ngrok.com/ | Binary downloaded in `mcp/kali-sandbox/Dockerfile` |
 | **Chisel** | Multi-port TCP tunneling | MIT | https://github.com/jpillora/chisel | Binary downloaded in `mcp/kali-sandbox/Dockerfile` |
 
@@ -284,7 +293,6 @@ These are libraries and frameworks used to build RedAmon's own web application, 
 | **httpx** | Async HTTP client for Python | BSD-3-Clause | https://github.com/encode/httpx | `mcp/requirements.txt`, `agentic/requirements.txt` |
 | **Requests** | HTTP library for Python | Apache-2.0 | https://github.com/psf/requests | Multiple `requirements.txt` files |
 | **dnspython** | DNS toolkit for Python | ISC | https://github.com/rthalley/dnspython | `recon/requirements.txt` |
-| **PySocks** | SOCKS proxy client (Tor / anonymity routing) | BSD-3-Clause | https://github.com/Anorov/PySocks | `recon/requirements.txt` |
 | **python-whois** | WHOIS lookup library | MIT | https://github.com/richardpenman/whois | `recon/requirements.txt` |
 | **xmltodict** | XML to Python dict parser | MIT | https://github.com/martinblech/xmltodict | `gvm_scan/requirements.txt` |
 | **SSE-Starlette** | Server-Sent Events for Starlette/FastAPI | BSD-3-Clause | https://github.com/sysid/sse-starlette | `recon_orchestrator/requirements.txt`, `mcp/requirements.txt` |
@@ -403,7 +411,7 @@ All other RedAmon source code (the webapp, the agent, the recon orchestrator, MC
 
 ### LGPL libraries
 
-Several LGPL-licensed libraries (PyGithub, Paramiko, psycopg, ldap3, Proxychains4) are used via standard Python imports or dynamic linking. The LGPL explicitly permits this without requiring the calling code to adopt LGPL or GPL terms, provided the libraries can be replaced or re-linked by the end user. Since RedAmon installs these via standard `pip` (user-replaceable), this condition is satisfied.
+Several LGPL-licensed libraries (PyGithub, Paramiko, psycopg, ldap3) are used via standard Python imports or dynamic linking. The LGPL explicitly permits this without requiring the calling code to adopt LGPL or GPL terms, provided the libraries can be replaced or re-linked by the end user. Since RedAmon installs these via standard `pip` (user-replaceable), this condition is satisfied.
 
 ### AGPL network-interaction obligation
 
@@ -411,4 +419,4 @@ AGPL-3.0 extends the GPL-3.0 copyleft to users who interact with the software **
 
 ---
 
-*Last updated: June 2026*
+*Last updated: July 2026*

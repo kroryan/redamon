@@ -239,10 +239,34 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const access = await requireProjectAccess(eff, id)
     if (access instanceof NextResponse) return access
 
-    // 1. Delete project from PostgreSQL
+    // Collect captured-traffic body refs BEFORE the cascade removes the rows, so
+    // we can ref-counted-GC the now-unreferenced blobs afterward (§6.6). Prisma
+    // cascade removes the rows but never touches the filesystem.
+    let capturedBodyRefs: (string | null)[] = []
+    try {
+      const doomed = await prisma.capturedHttpTransaction.findMany({
+        where: { projectId: id }, select: { reqBodyRef: true, respBodyRef: true },
+      })
+      capturedBodyRefs = doomed.flatMap(r => [r.reqBodyRef, r.respBodyRef])
+    } catch (e) {
+      console.warn('Could not enumerate captured body refs before project delete:', e)
+    }
+
+    // 1. Delete project from PostgreSQL (cascades captured_http_transactions rows)
     await prisma.project.delete({
       where: { id }
     })
+
+    // 1b. GC captured body blobs this project exclusively owned (ref-counted).
+    if (capturedBodyRefs.length > 0) {
+      try {
+        const { gcOrphanBodies } = await import('@/lib/captureBodies')
+        const gc = await gcOrphanBodies(capturedBodyRefs)
+        if (gc.deleted > 0) console.log(`[project-delete] GC'd ${gc.deleted} captured body blobs for project ${id}`)
+      } catch (e) {
+        console.warn('Captured body-blob GC failed on project delete:', e)
+      }
+    }
 
     // 2. Delete all output JSON files via orchestrator (it has write permissions)
     //    This covers: recon, GVM, and GitHub Secret Hunt JSON files

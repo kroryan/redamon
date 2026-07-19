@@ -27,7 +27,6 @@ from .docker_helpers import (
     pull_nuclei_docker_image,
     pull_katana_docker_image,
     ensure_templates_volume,
-    is_tor_running,
     NUCLEI_TEMPLATES_VOLUME,
 )
 
@@ -90,22 +89,6 @@ from .takeover_helpers import (
     BADDNS_DEFAULT_MODULES,
 )
 
-# Anonymity/Tor utilities
-from .anonymity import (
-    is_tor_running as is_tor_running_anonymity,
-    is_proxychains_available,
-    get_proxychains_cmd,
-    get_tor_session,
-    get_tor_exit_ip,
-    check_tor_connection,
-    print_anonymity_status,
-    run_through_tor,
-    run_command_anonymous,
-    get_real_ip,
-    require_tor,
-    TorProxy,
-)
-
 __all__ = [
     # Docker
     "is_docker_installed",
@@ -115,7 +98,6 @@ __all__ = [
     "pull_nuclei_docker_image",
     "pull_katana_docker_image",
     "ensure_templates_volume",
-    "is_tor_running",
     "NUCLEI_TEMPLATES_VOLUME",
     # Targets
     "extract_targets_from_recon",
@@ -158,18 +140,5 @@ __all__ = [
     "PROVIDER_FROM_SIGNAL",
     "BADDNS_MODULES",
     "BADDNS_DEFAULT_MODULES",
-    # Anonymity/Tor
-    "is_tor_running_anonymity",
-    "is_proxychains_available",
-    "get_proxychains_cmd",
-    "get_tor_session",
-    "get_tor_exit_ip",
-    "check_tor_connection",
-    "print_anonymity_status",
-    "run_through_tor",
-    "run_command_anonymous",
-    "get_real_ip",
-    "require_tor",
-    "TorProxy",
 ]
 

@@ -170,10 +170,6 @@ class TestBuildNucleiCommandPreservedFlags(unittest.TestCase):
         cmd = self._force_dast(interactsh=False)
         self.assertIn("-no-interactsh", cmd)
 
-    def test_keeps_proxy(self):
-        cmd = self._force_dast(use_proxy=True)
-        self.assertIn("-proxy", cmd)
-
 
 # ---------------------------------------------------------------------------
 # Unit tests: normal (non-force) mode keeps existing behaviour
@@ -359,7 +355,6 @@ class TestRunVulnScanTwoPass(unittest.TestCase):
             "NUCLEI_INTERACTSH": True,
             "NUCLEI_DOCKER_IMAGE": "projectdiscovery/nuclei:latest",
             "NUCLEI_AUTO_UPDATE_TEMPLATES": False,
-            "USE_TOR_FOR_RECON": False,
             "KATANA_DEPTH": 2,
             "CVE_LOOKUP_ENABLED": False,
             "SECURITY_CHECK_ENABLED": False,
@@ -379,7 +374,6 @@ class TestRunVulnScanTwoPass(unittest.TestCase):
             patch("recon.main_recon_modules.vuln_scan.is_docker_running", return_value=True),
             patch("recon.main_recon_modules.vuln_scan.pull_nuclei_docker_image", return_value=None),
             patch("recon.main_recon_modules.vuln_scan.ensure_templates_volume", return_value=True),
-            patch("recon.main_recon_modules.vuln_scan.is_tor_running", return_value=False),
             patch("recon.main_recon_modules.vuln_scan.extract_targets_from_recon", side_effect=_stub_extract_targets),
             patch("recon.main_recon_modules.vuln_scan.build_target_urls", side_effect=_stub_build_target_urls),
         ]
@@ -557,7 +551,7 @@ class TestRegression(unittest.TestCase):
         from recon.helpers.nuclei_helpers import build_nuclei_command
         params = inspect.signature(build_nuclei_command).parameters
         for old_param in (
-            "targets_file", "output_file", "docker_image", "use_proxy",
+            "targets_file", "output_file", "docker_image",
             "severity", "templates", "tags", "exclude_tags",
             "rate_limit", "dast_mode", "headless", "interactsh",
         ):

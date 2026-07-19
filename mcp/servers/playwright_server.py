@@ -85,7 +85,7 @@ CHROME_UA = (
 
 
 @mcp.tool()
-def execute_playwright(url: str = "", script: str = "", selector: str = "", format: str = "text") -> str:
+def execute_playwright(url: str = "", script: str = "", selector: str = "", format: str = "text", _redamon_ctx: str = "") -> str:
     """
     Browser automation tool with two modes: content extraction or custom scripting.
 
@@ -122,17 +122,80 @@ def execute_playwright(url: str = "", script: str = "", selector: str = "", form
         - script="page.goto('http://10.0.0.5/search')\\npage.fill('input[name=q]', '<script>alert(1)</script>')\\npage.click('button[type=submit]')\\npage.wait_for_load_state('networkidle')\\nprint(page.content()[:5000])"
     """
     if script.strip():
-        return _execute_script_mode(script)
+        return _execute_script_mode(script, _redamon_ctx)
     elif url.strip():
-        return _execute_content_mode(url, selector, format)
+        return _execute_content_mode(url, selector, format, _redamon_ctx)
     else:
         return "[ERROR] Provide either 'url' (content extraction) or 'script' (custom automation)."
 
 
-def _execute_content_mode(url: str, selector: str, format: str) -> str:
+def _capture_playwright_args(ctx_token: str):
+    """Return (proxy_kwarg, header_kwarg) f-string fragments for the browser
+    launch/context when routing through the capture proxy, else ('', ''). §20.2:
+    both are added together, only when reachable."""
+    try:
+        from capture_routing import agent_capture_routing
+        cap_url, cap_tok = agent_capture_routing(ctx_token)
+    except Exception:
+        cap_url, cap_tok = (None, None)
+    if not (cap_url and cap_tok):
+        return ("", "")
+    # ignore_https_errors is REQUIRED when routing: the capture proxy MITMs TLS with
+    # its own CA, which the browser does not trust, so without this every https
+    # navigation fails with ERR_CERT_AUTHORITY_INVALID and nothing is captured.
+    # Only emitted when capture is on, so non-capture playwright keeps strict TLS.
+    return (
+        f'proxy={{"server": {cap_url!r}}},',
+        f'extra_http_headers={{"X-Redamon-Ctx": {cap_tok!r}}}, ignore_https_errors=True,',
+    )
+
+
+def _capture_launch_patch(ctx_token: str) -> str:
+    """Monkeypatch fragment for SELF-CONTAINED scripts (they bring their own
+    `sync_playwright()`, so the wrapper's proxy=/extra_http_headers kwargs never
+    apply). Forces every browser launch through the capture proxy and stamps the
+    X-Redamon-Ctx header on every context (new_context also backs Browser.new_page
+    in playwright-python) and persistent context. Empty when not routing (§20.2:
+    proxy + header added together, only when reachable)."""
+    try:
+        from capture_routing import agent_capture_routing
+        cap_url, cap_tok = agent_capture_routing(ctx_token)
+    except Exception:
+        cap_url, cap_tok = (None, None)
+    if not (cap_url and cap_tok):
+        return ""
+    return textwrap.dedent(f"""\
+        import playwright.sync_api as _pw_cap
+        _pw_cap_url = {cap_url!r}
+        _pw_cap_hdr = {{"X-Redamon-Ctx": {cap_tok!r}}}
+        _pw_cap_L = _pw_cap.BrowserType.launch
+        def _pw_cap_launch(self, **kw):
+            kw["proxy"] = {{"server": _pw_cap_url}}
+            return _pw_cap_L(self, **kw)
+        _pw_cap.BrowserType.launch = _pw_cap_launch
+        _pw_cap_C = _pw_cap.Browser.new_context
+        def _pw_cap_new_context(self, **kw):
+            _h = dict(kw.get("extra_http_headers") or {{}}); _h.update(_pw_cap_hdr)
+            kw["extra_http_headers"] = _h
+            kw["ignore_https_errors"] = True  # trust the capture proxy's MITM CA
+            return _pw_cap_C(self, **kw)
+        _pw_cap.Browser.new_context = _pw_cap_new_context
+        _pw_cap_P = _pw_cap.BrowserType.launch_persistent_context
+        def _pw_cap_persistent(self, *a, **kw):
+            kw["proxy"] = {{"server": _pw_cap_url}}
+            _h = dict(kw.get("extra_http_headers") or {{}}); _h.update(_pw_cap_hdr)
+            kw["extra_http_headers"] = _h
+            kw["ignore_https_errors"] = True  # trust the capture proxy's MITM CA
+            return _pw_cap_P(self, *a, **kw)
+        _pw_cap.BrowserType.launch_persistent_context = _pw_cap_persistent
+    """)
+
+
+def _execute_content_mode(url: str, selector: str, format: str, ctx_token: str = "") -> str:
     """Mode 1: Navigate to URL and extract rendered content."""
     use_html = format.lower() == "html"
     max_chars = 40000
+    _proxy_kw, _hdr_kw = _capture_playwright_args(ctx_token)
 
     script = textwrap.dedent(f"""\
         from playwright.sync_api import sync_playwright
@@ -140,10 +203,12 @@ def _execute_content_mode(url: str, selector: str, format: str) -> str:
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
+                {_proxy_kw}
                 args={BROWSER_ARGS!r}
             )
             context = browser.new_context(
                 user_agent={CHROME_UA!r},
+                {_hdr_kw}
             )
             page = context.new_page()
 
@@ -225,8 +290,9 @@ _LAUNCH_PATCH = textwrap.dedent(f"""\
 """)
 
 
-def _execute_script_mode(user_script: str) -> str:
+def _execute_script_mode(user_script: str, ctx_token: str = "") -> str:
     """Mode 2: Run arbitrary Playwright Python script with pre-initialized browser."""
+    _proxy_kw, _hdr_kw = _capture_playwright_args(ctx_token)
     for pattern, name in _FORBIDDEN_ASYNC_PATTERNS:
         if pattern.search(user_script):
             return (
@@ -239,17 +305,20 @@ def _execute_script_mode(user_script: str) -> str:
             )
 
     # Self-contained script (brings its own `sync_playwright()` context): run it raw
-    # so we don't nest two sync contexts. Inject browser args via a launch monkeypatch.
+    # so we don't nest two sync contexts. Inject browser args via a launch monkeypatch,
+    # and (when capture is on) force the proxy + X-Redamon-Ctx via _capture_launch_patch
+    # so self-contained scripts are captured like the wrapped path.
     if _SELF_CONTAINED_RE.search(user_script):
-        return _run_playwright_script(_LAUNCH_PATCH + user_script, timeout=60)
+        return _run_playwright_script(
+            _LAUNCH_PATCH + _capture_launch_patch(ctx_token) + user_script, timeout=60)
 
     # Build wrapper script with correct indentation
     lines = [
         "from playwright.sync_api import sync_playwright",
         "",
         "with sync_playwright() as p:",
-        f"    browser = p.chromium.launch(headless=True, args={BROWSER_ARGS!r})",
-        f"    context = browser.new_context(user_agent={CHROME_UA!r}, viewport={{\"width\": 1280, \"height\": 720}})",
+        f"    browser = p.chromium.launch(headless=True, {_proxy_kw} args={BROWSER_ARGS!r})",
+        f"    context = browser.new_context(user_agent={CHROME_UA!r}, {_hdr_kw} viewport={{\"width\": 1280, \"height\": 720}})",
         "    page = context.new_page()",
         "    try:",
     ]

@@ -2,7 +2,6 @@
 # ============================================
 # Fully containerized OSINT reconnaissance framework
 # Supports Docker-in-Docker for ProjectDiscovery tools
-# Includes Tor/Proxychains for anonymous scanning
 
 # Stage 1a: Build jsluice binary (Go-based JS analyzer, requires CGO for tree-sitter)
 # Static linking required: Alpine uses musl but the final image uses Debian/glibc
@@ -75,16 +74,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 
 # Install system dependencies
 # - Docker CLI for orchestrating ProjectDiscovery containers
-# - Tor and proxychains for anonymous scanning
 # - DNS utilities for domain resolution
 # - Git for installing knock-subdomains
 # - Build tools for Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Docker CLI (to communicate with host Docker daemon)
     docker-ce-cli \
-    # Tor and proxychains for anonymous scanning
-    tor \
-    proxychains4 \
     # DNS utilities
     dnsutils \
     bind9-host \
@@ -109,20 +104,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy masscan binary from builder stage
 COPY --from=masscan-builder /masscan/bin/masscan /usr/local/bin/masscan
-
-# Configure proxychains for Tor
-# Use dynamic_chain for better reliability
-RUN sed -i 's/^strict_chain/#strict_chain/' /etc/proxychains4.conf && \
-    sed -i 's/^#dynamic_chain/dynamic_chain/' /etc/proxychains4.conf && \
-    echo "socks5 127.0.0.1 9050" >> /etc/proxychains4.conf
-
-# Create Tor configuration for running as service
-RUN mkdir -p /var/run/tor && \
-    chown -R debian-tor:debian-tor /var/run/tor && \
-    echo "SocksPort 0.0.0.0:9050" > /etc/tor/torrc && \
-    echo "ControlPort 9051" >> /etc/tor/torrc && \
-    echo "CookieAuthentication 0" >> /etc/tor/torrc && \
-    echo "Log notice stdout" >> /etc/tor/torrc
 
 # Create non-root user for security (but allow Docker access)
 RUN groupadd -f docker && \
@@ -168,7 +149,7 @@ RUN mkdir -p /app/recon/wordlists && \
         -o /app/recon/wordlists/jhaddix-all.txt
 
 # Copy the application code
-# Copy recon module (includes recon/params.py and helpers/anonymity.py)
+# Copy recon module (includes recon/params.py)
 COPY recon/ /app/recon/
 
 # Copy graph_db module (for Neo4j integration)
@@ -183,14 +164,10 @@ RUN chmod +x /app/entrypoint.sh
 # Create volume mount points (NOT /app/recon/output - that's bind-mounted by the orchestrator)
 VOLUME ["/var/run/docker.sock", "/data"]
 
-# Expose Tor SOCKS port (if using container's Tor)
-EXPOSE 9050
-
 # Set default environment variables (can be overridden)
 ENV TARGET_DOMAIN=""
 ENV SUBDOMAIN_LIST=""
 ENV SCAN_MODULES="domain_discovery,port_scan,http_probe,resource_enum,vuln_scan"
-ENV USE_TOR_FOR_RECON="false"
 ENV USE_BRUTEFORCE_FOR_SUBDOMAINS="false"
 ENV UPDATE_GRAPH_DB="false"
 ENV USER_ID="default_user"

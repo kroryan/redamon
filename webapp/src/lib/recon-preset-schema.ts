@@ -20,7 +20,6 @@ export const reconPresetSchema = z.object({
   aiInPipeline: bool,
   aiPipelineModel: str,
   updateGraphDb: bool,
-  useTorForRecon: bool,
   useBruteforceForSubdomains: bool,
 
   // -- WHOIS / DNS --
@@ -529,7 +528,6 @@ export const RECON_PARAMETER_CATALOG = `
 - aiInPipeline: boolean - Master toggle that enables AI-powered enhancements across all recon modules that support them. Cascades on/off to per-tool AI flags (ffufAiExtensions, nucleiAiTags, wafAiClassifier, nucleiAiResponseFilter, takeoverAiClassifier).
 - aiPipelineModel: string - Model identifier for the AI hooks in recon (e.g. "claude-opus-4-6", "claude-haiku-4-5-20251001"). Independent of agentOpenaiModel.
 - updateGraphDb: boolean - Store results in the graph database
-- useTorForRecon: boolean - Route traffic through Tor
 - useBruteforceForSubdomains: boolean - Enable DNS brute-force for subdomain discovery
 
 ## WHOIS & DNS

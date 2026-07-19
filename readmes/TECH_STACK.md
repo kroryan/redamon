@@ -71,7 +71,6 @@
 | **Knockpy** | Subdomain Discovery | Active subdomain brute-forcing tool |
 | **Wappalyzer** | Fingerprinting | Technology fingerprinting engine with 6,000+ detection rules |
 | **Interactsh** | Out-of-Band Detection | Callback server for detecting blind vulnerabilities (SSRF, XXE, blind SQLi) |
-| **Tor / Proxychains4** | Anonymity | Anonymous traffic routing for stealthy reconnaissance |
 
 ## Vulnerability Assessment
 

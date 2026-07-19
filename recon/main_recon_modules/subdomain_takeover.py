@@ -514,7 +514,6 @@ def _run_nuclei_takeover(urls: list[str], work_dir: Path, settings: dict) -> lis
         system_resolvers=bool(settings.get("NUCLEI_SYSTEM_RESOLVERS", True)),
         follow_redirects=bool(settings.get("NUCLEI_FOLLOW_REDIRECTS", True)),
         max_redirects=int(settings.get("NUCLEI_MAX_REDIRECTS", 10)),
-        use_proxy=False,
         interactsh=False,  # Takeover templates don't need OOB interactions
     )
     print(f"[*][Takeover][Nuclei] {' '.join(cmd)}")

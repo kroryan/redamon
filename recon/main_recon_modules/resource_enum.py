@@ -44,7 +44,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from recon.helpers import (
     is_docker_installed,
     is_docker_running,
-    is_tor_running,
     extract_targets_from_recon,
     build_target_urls,
 )
@@ -335,7 +334,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             ("ARJUN_MAX_ENDPOINTS", "Arjun"),
             ("ARJUN_DISABLE_REDIRECTS", "Arjun"),
             ("ARJUN_CUSTOM_HEADERS", "Arjun"),
-            ("USE_TOR_FOR_RECON", "Anonymity"),
         ],
     )
 
@@ -501,9 +499,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     KITERUNNER_METHOD_DETECT_THREADS = settings.get('KITERUNNER_METHOD_DETECT_THREADS', 20)
     KITERUNNER_PARALLELISM = settings.get('KITERUNNER_PARALLELISM', 2)
 
-    # General settings
-    USE_TOR_FOR_RECON = settings.get('USE_TOR_FOR_RECON', False)
-
     # Check Docker
     if not is_docker_installed():
         print("[!][ResourceEnum] Docker not found. Please install Docker.")
@@ -539,15 +534,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
         if KITERUNNER_ENABLED and KITERUNNER_WORDLISTS:
             kr_binary_path, _ = kr_future.result()
 
-    # Check Tor status
-    use_proxy = False
-    if USE_TOR_FOR_RECON:
-        if is_tor_running():
-            use_proxy = True
-            print(f"[*][ResourceEnum] Anonymous mode: Using Tor SOCKS proxy")
-        else:
-            print("[!][ResourceEnum] Tor not running, falling back to direct connection")
-
     # Build target URLs as the UNION of every available source (deduplicated).
     # Sources merged:
     #   1. httpx-verified BaseURLs (http_probe.by_url)
@@ -576,7 +562,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
 
     print(f"\n[*][ResourceEnum] Target URLs: {len(target_urls)}")
     print(f"[*][ResourceEnum] Target domains (for GAU): {len(target_domains)}")
-    print(f"[*][ResourceEnum] Tor proxy: {use_proxy}")
     # Katana settings
     print(f"[*][Katana] Enabled: {KATANA_ENABLED}")
     if KATANA_ENABLED:
@@ -757,7 +742,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 target_domains,
                 KATANA_CUSTOM_HEADERS,
                 KATANA_EXCLUDE_PATTERNS,
-                use_proxy,
                 KATANA_PARALLELISM,
                 KATANA_CONCURRENCY,
             )
@@ -777,7 +761,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 target_domains,
                 HAKRAWLER_CUSTOM_HEADERS,
                 KATANA_EXCLUDE_PATTERNS,
-                use_proxy,
                 HAKRAWLER_PARALLELISM,
             )
 
@@ -794,7 +777,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 GAU_MAX_URLS,
                 GAU_YEAR_RANGE,
                 GAU_VERBOSE,
-                use_proxy,
                 URLSCAN_API_KEY,
                 GAU_WORKERS,
             )
@@ -806,7 +788,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 target_domains,
                 PARAMSPIDER_PLACEHOLDER,
                 PARAMSPIDER_TIMEOUT,
-                use_proxy,
                 PARAMSPIDER_WORKERS,
             )
 
@@ -856,8 +837,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 KITERUNNER_IGNORE_STATUS,
                 KITERUNNER_MATCH_STATUS,
                 KITERUNNER_MIN_CONTENT_LENGTH,
-                KITERUNNER_HEADERS,
-                use_proxy
+                KITERUNNER_HEADERS
             )
             return wordlist_name, wordlist_results
 
@@ -889,7 +869,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     # Organize discovered endpoints
     if katana_urls:
         print("\n[*][Katana] Organizing endpoints...")
-    organized_data = organize_endpoints(katana_urls, use_proxy=use_proxy)
+    organized_data = organize_endpoints(katana_urls)
 
     # Mark all Katana endpoints with sources=['katana'] (array format)
     for base_url, base_data in organized_data['by_base_url'].items():
@@ -905,7 +885,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
 
     if HAKRAWLER_ENABLED and hakrawler_urls:
         print("\n[*][Hakrawler] Organizing and merging endpoints...")
-        hakrawler_organized = organize_endpoints(hakrawler_urls, use_proxy=use_proxy)
+        hakrawler_organized = organize_endpoints(hakrawler_urls)
         organized_data['by_base_url'], hakrawler_stats = merge_hakrawler_into_by_base_url(
             hakrawler_organized['by_base_url'],
             organized_data['by_base_url'],
@@ -942,8 +922,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 JSLUICE_EXTRACT_SECRETS,
                 JSLUICE_CONCURRENCY,
                 JSLUICE_PARALLELISM,
-                target_domains,
-                use_proxy
+                target_domains
             )
 
             jsluice_urls_pre_verify_count = len(jsluice_result.get("urls", []))
@@ -958,7 +937,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                         JSLUICE_VERIFY_RATE_LIMIT,
                         JSLUICE_VERIFY_ACCEPT_STATUS,
                         JSLUICE_EXCLUDE_PATTERNS,
-                        use_proxy,
                     )
                     jsluice_result["urls"] = sorted(verified_jsluice_urls)
                     jsluice_stats.update(verify_stats)
@@ -1044,7 +1022,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 FFUF_FOLLOW_REDIRECTS,
                 target_domains,
                 discovered_base_paths,
-                use_proxy,
                 FFUF_PARALLELISM,
             )
 
@@ -1089,7 +1066,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             random_inputs=ZAP_AJAX_SPIDER_RANDOM_INPUTS,
             logout_avoidance=ZAP_AJAX_SPIDER_LOGOUT_AVOIDANCE,
             scope_check=ZAP_AJAX_SPIDER_SCOPE_CHECK,
-            use_proxy=use_proxy,
             parallelism=ZAP_AJAX_SPIDER_PARALLELISM,
         )
 
@@ -1148,7 +1124,6 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 ARJUN_DISABLE_REDIRECTS,
                 ARJUN_CUSTOM_HEADERS,
                 target_domains,
-                use_proxy,
             )
 
             if arjun_results:
@@ -1207,8 +1182,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 GAU_VERIFY_TIMEOUT,
                 GAU_VERIFY_RATE_LIMIT,
                 GAU_VERIFY_THREADS,
-                GAU_VERIFY_ACCEPT_STATUS,
-                use_proxy
+                GAU_VERIFY_ACCEPT_STATUS
             )
 
         # Detect HTTP methods for GAU URLs using OPTIONS probe
@@ -1221,8 +1195,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 GAU_METHOD_DETECT_THREADS,
                 GAU_METHOD_DETECT_TIMEOUT,
                 GAU_METHOD_DETECT_RATE_LIMIT,
-                GAU_FILTER_DEAD_ENDPOINTS,
-                use_proxy
+                GAU_FILTER_DEAD_ENDPOINTS
             )
 
         # Merge GAU into by_base_url (use in-scope URLs only)
@@ -1297,8 +1270,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
                 KITERUNNER_BRUTEFORCE_METHODS,
                 KITERUNNER_METHOD_DETECT_TIMEOUT,
                 KITERUNNER_METHOD_DETECT_RATE_LIMIT,
-                KITERUNNER_METHOD_DETECT_THREADS,
-                use_proxy
+                KITERUNNER_METHOD_DETECT_THREADS
             )
 
         print("\n[*][Kiterunner] Merging API endpoints into results...")
@@ -1435,7 +1407,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             'arjun_params_discovered': arjun_stats['arjun_params_discovered'],
             'arjun_stats': arjun_stats,
             # General
-            'proxy_used': use_proxy,
+            'proxy_used': False,
             'target_urls_count': len(target_urls),
             'target_domains_count': len(target_domains),
             'total_discovered_urls': len(all_discovered_urls)

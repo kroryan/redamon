@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 from agent_context import (  # noqa: E402
     current_user_id,
     current_project_id,
+    current_session_id,
     current_phase,
     current_graph_view_cypher,
     set_tenant_context,
@@ -53,6 +54,36 @@ from agent_context import (  # noqa: E402
     get_graph_view_context,
     get_phase_context,
 )
+
+
+# Target-facing agent tools whose traffic should route through the capture proxy
+# when enabled (plan §9.1 allowlist). Deliberately excludes OSINT / API-key tools
+# (cve_intel, shodan, execute_gau, web_search, …) so their keys never touch the
+# proxy (§15.4). The kali MCP servers add the proxy flag + X-Redamon-Ctx header.
+# The HTTP recon/exploit tools below mirror the recon pipeline's routing so the
+# agent's own crawl/fuzz/scan traffic is captured, searchable, and replayable.
+_CAPTURE_ROUTED_TOOLS = frozenset({
+    "execute_curl", "execute_httpx", "execute_playwright",
+    "execute_nuclei", "execute_katana", "execute_ffuf",
+    "execute_arjun", "execute_wpscan",
+})
+
+_HTTP_STATUS_RE = re.compile(r"HTTP/\d(?:\.\d)?\s+(\d{3})")
+
+
+def _first_http_status(text: str) -> str:
+    """Pull the first HTTP status code out of a curl -i response body."""
+    m = _HTTP_STATUS_RE.search(text or "")
+    return m.group(1) if m else "?"
+
+# Captured-traffic read/analyze tools (Phase 4 §10.4) — dispatched by passing the
+# structured tool_args straight through, like other in-process tools.
+try:
+    from traffic_tools import TRAFFIC_READ_TOOL_NAMES as _TRAFFIC_READ_TOOL_NAMES
+    from traffic_tools import ACTIVE_PROXY_TOOL_NAMES as _ACTIVE_PROXY_TOOL_NAMES
+except Exception:  # noqa: BLE001 — keep tools.py importable even if the module is absent
+    _TRAFFIC_READ_TOOL_NAMES = frozenset()
+    _ACTIVE_PROXY_TOOL_NAMES = frozenset()
 
 
 # =============================================================================
@@ -1645,6 +1676,16 @@ class PhaseAwareToolExecutor:
         if tradecraft_tool:
             self._all_tools["tradecraft_lookup"] = tradecraft_tool
 
+        # Register the captured-traffic read/analyze tools (Phase 4, §10.4).
+        # In-process (like query_graph), tenant-scoped from ContextVars — NOT in
+        # _mcp_tool_names, so they never trigger an MCP reconnect.
+        try:
+            from traffic_tools import build_traffic_read_tools, build_traffic_active_tools
+            for _name, _tool in {**build_traffic_read_tools(), **build_traffic_active_tools()}.items():
+                self._all_tools[_name] = _tool
+        except Exception as _tt_err:  # noqa: BLE001
+            logger.warning(f"Failed to register traffic tools: {_tt_err}")
+
     def register_mcp_tools(
         self,
         tools: List,
@@ -1745,6 +1786,114 @@ class PhaseAwareToolExecutor:
         Never written to disk or to a global env var; never visible to the LLM.
         """
         self._cve_intel_api_key = key
+
+    def set_capture_proxy_enabled(self, enabled: bool) -> None:
+        """Per-project HTTP-capture routing gate for the agent's target tools."""
+        self._capture_proxy_enabled = bool(enabled)
+
+    def _build_redamon_ctx(self, tool_name: str) -> str:
+        """Sign an X-Redamon-Ctx tag for the current tool call (plan §10.1/§20.4).
+
+        The agent holds INTERNAL_API_KEY and signs here; the kali MCP server only
+        carries the opaque token (adds the proxy flag + header when routing), so
+        the least-trusted worker holds no signing key. Tenant/session/phase come
+        from ContextVars, never from LLM args. Returns "" if we can't/shouldn't tag.
+        """
+        try:
+            from redamon_ctx import sign_tag
+            key = os.environ.get("INTERNAL_API_KEY", "")
+            if not key:
+                return ""
+            payload = {
+                "source": "agent",
+                "project_id": current_project_id.get(),
+                "user_id": current_user_id.get(),
+                "session_id": current_session_id.get() or None,
+                "tool": tool_name,
+                "phase": current_phase.get(),
+            }
+            if not payload["project_id"] or not payload["user_id"]:
+                return ""
+            return sign_tag(payload, key)
+        except Exception:
+            return ""
+
+    def _replay_ctx(self, tool_name: str, origin_id: str) -> str:
+        """Sign a replay tag (source=agent + is_replay + origin_id) so the ingest
+        marks the replayed transaction's lineage from the VERIFIED tag."""
+        try:
+            from redamon_ctx import sign_tag
+            key = os.environ.get("INTERNAL_API_KEY", "")
+            if not key:
+                return ""
+            payload = {
+                "source": "agent",
+                "project_id": current_project_id.get(),
+                "user_id": current_user_id.get(),
+                "session_id": current_session_id.get() or None,
+                "tool": tool_name,
+                "phase": current_phase.get(),
+                "is_replay": True,
+                "origin_id": origin_id,
+            }
+            if not payload["project_id"] or not payload["user_id"]:
+                return ""
+            return sign_tag(payload, key)
+        except Exception:
+            return ""
+
+    async def _run_active_proxy(self, tool_name: str, tool_args: dict) -> str:
+        """Execute proxy_replay / proxy_fuzz: read the origin (tenant-scoped), build
+        the mutated request (host PINNED to origin, §15.5), and SEND it via the
+        worker's execute_curl through the capture proxy (so it's captured + scope-
+        checked by the proxy). Never sends to a host other than the origin's."""
+        import json as _json
+        try:
+            from traffic_tools import fetch_transaction, build_replay_curl, build_fuzz_curls
+        except Exception as e:  # noqa: BLE001
+            return f"traffic tools unavailable: {e}"
+
+        origin_id = str(tool_args.get("id", "") or "")
+        if not origin_id:
+            return "Error: `id` (origin transaction) is required."
+        txn = await fetch_transaction(origin_id)
+        if not txn:
+            return "Origin transaction not found (or not in your project)."
+        execute_curl = self._all_tools.get("execute_curl")
+        if execute_curl is None:
+            return "execute_curl is unavailable — cannot send the request."
+        ctx = self._replay_ctx(tool_name, origin_id)
+
+        async def _send(args: str) -> str:
+            resp = await execute_curl.ainvoke({"args": args, "_redamon_ctx": ctx})
+            return self._extract_text_from_output(resp)
+
+        if tool_name == "proxy_replay":
+            try:
+                mutate = _json.loads(tool_args.get("mutate") or "{}")
+                if not isinstance(mutate, dict):
+                    raise ValueError
+            except (ValueError, TypeError):
+                return "Error: `mutate` must be a JSON object."
+            args = build_replay_curl(txn, mutate)
+            out = await _send(args)
+            return f"Replayed origin {origin_id} (isReplay) to {txn.get('host')}:\n{out}"
+
+        # proxy_fuzz
+        ip = str(tool_args.get("insertion_point", "") or "")
+        try:
+            payloads = _json.loads(tool_args.get("payloads") or "[]")
+        except (ValueError, TypeError):
+            return "Error: `payloads` must be a JSON array of strings."
+        if not ip or not isinstance(payloads, list) or not payloads:
+            return "Error: provide `insertion_point` (a query param name) and a non-empty `payloads` array."
+        results = []
+        for pl, args in build_fuzz_curls(txn, ip, payloads):
+            resp = await _send(args)
+            status = _first_http_status(resp)
+            results.append(f"{ip}={pl!r} -> {status}  (~{len(resp)}b)")
+        note = "" if len(payloads) <= 50 else f"\n(capped at 50 of {len(payloads)} payloads)"
+        return f"proxy_fuzz on origin {origin_id} @ '{ip}' ({len(results)} sent):\n" + "\n".join(results) + note
 
     def _extract_text_from_output(self, output) -> str:
         """
@@ -1927,10 +2076,29 @@ class PhaseAwareToolExecutor:
                 "error": f"Tool '{tool_name}' not found"
             }
 
+        # HTTP traffic capture (Phase 1): for target-facing tools, inject a signed,
+        # opaque X-Redamon-Ctx tag as a stripped arg the LLM never sees. The kali
+        # MCP tool turns it into the proxy flag + header ONLY when the proxy is
+        # reachable (§20.2 no-leak). Gated on the per-project capture flag; NEVER
+        # added to API-key/OSINT tools (§15.4).
+        if (tool_name in _CAPTURE_ROUTED_TOOLS
+                and getattr(self, "_capture_proxy_enabled", False)):
+            _redamon_ctx = self._build_redamon_ctx(tool_name)
+            if _redamon_ctx:
+                tool_args = {**tool_args, "_redamon_ctx": _redamon_ctx}
+
         # Dispatch logic pulled into a closure so we can re-invoke with a
         # fresh tool reference after an MCP reconnect.
         async def _invoke(active_tool) -> str:
-            if tool_name == "query_graph":
+            if tool_name in _ACTIVE_PROXY_TOOL_NAMES:
+                # proxy_replay/proxy_fuzz: read the origin (tenant-scoped) + SEND via
+                # the worker execute_curl through the capture proxy. Orchestrated here
+                # because the send needs the MCP tool; the @tool stub is never called.
+                return await self._run_active_proxy(tool_name, tool_args)
+            if tool_name in _TRAFFIC_READ_TOOL_NAMES:
+                # Captured-traffic read tools take structured args by name.
+                output = await active_tool.ainvoke(tool_args)
+            elif tool_name == "query_graph":
                 output = await active_tool.ainvoke(tool_args.get("question", ""))
             elif tool_name == "web_search":
                 output = await active_tool.ainvoke(tool_args.get("query", ""))

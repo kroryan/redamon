@@ -423,7 +423,6 @@ def test_run_discovery_builds_correct_command():
             disable_redirects=True,
             custom_headers=['Authorization: Bearer tok', 'X-Key: abc'],
             allowed_hosts={'example.com'},
-            use_proxy=False,
         )
 
     assert captured_cmd[0] == 'arjun'
@@ -490,74 +489,6 @@ def test_run_discovery_no_rate_limit_flag_when_zero():
     assert '--rate-limit' not in captured_cmd
 
     print("PASS: test_run_discovery_no_rate_limit_flag_when_zero")
-
-
-def test_run_discovery_proxy_env_vars():
-    """When use_proxy=True, HTTP_PROXY/HTTPS_PROXY should be set in env."""
-    from recon.helpers.resource_enum.arjun_helpers import run_arjun_discovery
-
-    captured_env = {}
-
-    def mock_subprocess_run(cmd, **kwargs):
-        captured_env.update(kwargs.get('env', {}))
-        for i, arg in enumerate(cmd):
-            if arg == '-oJ' and i + 1 < len(cmd):
-                with open(cmd[i + 1], 'w') as f:
-                    json.dump({}, f)
-        return subprocess.CompletedProcess(cmd, 0, '', '')
-
-    with mock.patch('recon.helpers.resource_enum.arjun_helpers.subprocess.run', side_effect=mock_subprocess_run):
-        run_arjun_discovery(
-            target_urls=['https://example.com'],
-            methods=['GET'], threads=2, timeout=15, scan_timeout=600,
-            chunk_size=500, rate_limit=0, stable=False, passive=False,
-            disable_redirects=False, custom_headers=[],
-            allowed_hosts={'example.com'},
-            use_proxy=True,
-        )
-
-    assert captured_env.get('HTTP_PROXY') == 'socks5://127.0.0.1:9050'
-    assert captured_env.get('HTTPS_PROXY') == 'socks5://127.0.0.1:9050'
-
-    print("PASS: test_run_discovery_proxy_env_vars")
-
-
-def test_run_discovery_no_proxy_when_disabled():
-    """When use_proxy=False, proxy env vars should NOT be set."""
-    from recon.helpers.resource_enum.arjun_helpers import run_arjun_discovery
-
-    captured_env = {}
-
-    def mock_subprocess_run(cmd, **kwargs):
-        captured_env.update(kwargs.get('env', {}))
-        for i, arg in enumerate(cmd):
-            if arg == '-oJ' and i + 1 < len(cmd):
-                with open(cmd[i + 1], 'w') as f:
-                    json.dump({}, f)
-        return subprocess.CompletedProcess(cmd, 0, '', '')
-
-    original_http_proxy = os.environ.get('HTTP_PROXY')
-    # Ensure no inherited proxy
-    os.environ.pop('HTTP_PROXY', None)
-    os.environ.pop('HTTPS_PROXY', None)
-
-    try:
-        with mock.patch('recon.helpers.resource_enum.arjun_helpers.subprocess.run', side_effect=mock_subprocess_run):
-            run_arjun_discovery(
-                target_urls=['https://example.com'],
-                methods=['GET'], threads=2, timeout=15, scan_timeout=600,
-                chunk_size=500, rate_limit=0, stable=False, passive=False,
-                disable_redirects=False, custom_headers=[],
-                allowed_hosts={'example.com'},
-                use_proxy=False,
-            )
-
-        assert 'HTTP_PROXY' not in captured_env or captured_env.get('HTTP_PROXY') is None
-    finally:
-        if original_http_proxy:
-            os.environ['HTTP_PROXY'] = original_http_proxy
-
-    print("PASS: test_run_discovery_no_proxy_when_disabled")
 
 
 def test_run_discovery_scope_filtering():
@@ -953,8 +884,6 @@ if __name__ == '__main__':
     # Discovery tests (mocked)
     test_run_discovery_builds_correct_command()
     test_run_discovery_no_rate_limit_flag_when_zero()
-    test_run_discovery_proxy_env_vars()
-    test_run_discovery_no_proxy_when_disabled()
     test_run_discovery_scope_filtering()
     test_run_discovery_empty_targets()
     test_run_discovery_timeout_handling()

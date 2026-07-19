@@ -45,9 +45,8 @@ Bug bounty hunters triaging a new target. You want to know if there are quick wi
     // No port_scan (saves time), no js_recon (too slow)
     scanModules: ['domain_discovery', 'http_probe', 'resource_enum', 'vuln_scan'],
 
-    // No stealth, no Tor
+    // No stealth
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools at default limits ---
     subdomainDiscoveryEnabled: true,

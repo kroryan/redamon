@@ -56,7 +56,29 @@ describe('scannerKeyRouteAllowed — S3/E6 scoped scanner token', () => {
     ['POST', '/api/remediations'],
     ['GET', '/api/global/tunnel-config'],
     ['POST', '/api/users/abc/settings'],           // scanner is GET-only
+    ['GET', '/api/traffic/p1/ingest'],             // ingest is POST-only
+    ['POST', '/api/traffic/p1'],                    // list route is not a write target
+    ['GET', '/api/traffic/p1'],                     // read routes use JWT, not scanner key
   ])('%s %s → NOT allowed for scanner', (method, path) => {
     expect(scannerKeyRouteAllowed(method, path)).toBe(false)
+  })
+})
+
+describe('traffic-capture ingest route allowlisting', () => {
+  test('scanner key may POST the ingest route (recon capture)', () => {
+    expect(scannerKeyRouteAllowed('POST', '/api/traffic/proj-123/ingest')).toBe(true)
+  })
+  test('internal key may POST the ingest route (agent capture, Phase 1)', () => {
+    expect(internalKeyRouteAllowed('POST', '/api/traffic/proj-123/ingest')).toBe(true)
+  })
+  test('ingest allowlisting does not leak to the read routes', () => {
+    // Only /ingest is opened; the tenant-scoped read routes stay JWT-only.
+    expect(scannerKeyRouteAllowed('GET', '/api/traffic/proj-123')).toBe(false)
+    expect(scannerKeyRouteAllowed('GET', '/api/traffic/proj-123/facets')).toBe(false)
+    expect(internalKeyRouteAllowed('GET', '/api/traffic/proj-123/some-id')).toBe(false)
+  })
+  test('cannot smuggle a different route via the projectId segment', () => {
+    // The [^/]+ segment cannot contain a slash, so no path traversal into other APIs.
+    expect(scannerKeyRouteAllowed('POST', '/api/traffic/p1/ingest/../../users/x/settings')).toBe(false)
   })
 })

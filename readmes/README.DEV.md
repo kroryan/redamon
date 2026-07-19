@@ -289,7 +289,6 @@ redamon/
 │   │   ├── cve_helpers.py          #     CVE lookup and enrichment
 │   │   ├── docker_helpers.py       #     Container-aware path resolution
 │   │   ├── iana_services.py        #     IANA port/service mapping
-│   │   ├── anonymity.py            #     Tor/proxy support
 │   │   └── resource_enum/          #     Resource enumeration sub-helpers
 │   ├── tests/                      #   Recon test suite
 │   ├── data/                       #   Static data files (wordlists, templates)

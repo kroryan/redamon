@@ -42,7 +42,6 @@ def build_nuclei_command(
     targets_file: str,
     output_file: str,
     docker_image: str,
-    use_proxy: bool = False,
     # Nuclei configuration
     severity: List[str] = None,
     templates: List[str] = None,
@@ -72,7 +71,6 @@ def build_nuclei_command(
         targets_file: Path to file containing target URLs
         output_file: Path for JSON output
         docker_image: Nuclei Docker image to use
-        use_proxy: Whether to use Tor proxy
         force_dast_pass: When True, forces -dast and drops tag/template
             filters that would otherwise empty-intersect with the DAST set
             (built-in DAST templates carry tags like xss/sqli/ssti, not the
@@ -235,11 +233,14 @@ def build_nuclei_command(
     # Interactsh (OOB testing)
     if not interactsh:
         cmd.append("-no-interactsh")
-    
-    # Proxy for Tor
-    if use_proxy:
-        cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
-    
+
+    # HTTP traffic capture (Phase 1): route through the capture proxy when
+    # enabled + reachable; tag added ONLY in this branch (§20.2 no-leak).
+    from helpers.proxy_routing import get_capture_routing
+    _cap_url, _cap_token = get_capture_routing("nuclei")
+    if _cap_url and _cap_token:
+        cmd.extend(["-proxy", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_token}"])
+
     return cmd
 
 

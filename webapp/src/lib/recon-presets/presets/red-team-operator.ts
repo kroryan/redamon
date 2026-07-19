@@ -5,9 +5,9 @@ export const RED_TEAM_OPERATOR: ReconPreset = {
   name: 'Red Team Operator',
   icon: '',
   image: '/preset-skull.svg',
-  shortDescription: 'Balanced stealth with targeted active validation. Connect scan, throttled httpx/Katana, critical-only Nuclei, Tor routing, and full OSINT enrichment -- controlled aggression for authorized red team engagements.',
+  shortDescription: 'Balanced stealth with targeted active validation. Connect scan, throttled httpx/Katana, critical-only Nuclei, and full OSINT enrichment -- controlled aggression for authorized red team engagements.',
   fullDescription: `### Pipeline Goal
-Perform reconnaissance that balances stealth with actionable results. Instead of going fully passive, this preset uses carefully throttled active probes -- connect scans instead of SYN, low-concurrency Nuclei limited to critical findings, and rate-limited crawling. All traffic routes through Tor. The goal is to build a comprehensive attack surface map while keeping noise low enough to avoid triggering most detection systems.
+Perform reconnaissance that balances stealth with actionable results. Instead of going fully passive, this preset uses carefully throttled active probes -- connect scans instead of SYN, low-concurrency Nuclei limited to critical findings, and rate-limited crawling. The goal is to build a comprehensive attack surface map while keeping noise low enough to avoid triggering most detection systems.
 
 ### Who is this for?
 Red team operators running authorized engagements where some active probing is acceptable but detection avoidance still matters. Penetration testers who need more signal than a passive-only scan but cannot afford to trip IDS/IPS or WAF rules. Useful during the initial phases of a red team operation when you need to identify critical entry points without burning your access.
@@ -24,7 +24,6 @@ Red team operators running authorized engagements where some active probing is a
 - Nuclei limited to critical severity only, 5 req/s, concurrency 3, excludes dos/fuzz/intrusive tags
 - CVE lookup and MITRE enrichment for vulnerability context
 - OSINT enrichment via Shodan (host lookup, reverse DNS, passive CVEs), URLScan, OTX, and Censys
-- Tor routing for all active probes
 
 ### What it disables
 - Masscan (generates massive packet volume, easily detected)
@@ -46,13 +45,13 @@ Red team operators running authorized engagements where some active probing is a
 1. Subdomain discovery runs entirely through passive sources -- certificate logs, DNS databases, and OSINT APIs
 2. DNS resolution and Puredns filtering use public resolvers
 3. Naabu performs TCP connect scans at rate 50 with 5 threads -- connect scans complete the TCP handshake, avoiding the half-open SYN pattern that many IDS systems flag
-4. httpx probes discovered hosts through Tor at 3 threads and rate 5/s, collecting status codes, titles, tech stack, IPs, CNAMEs, and TLS info
-5. Katana performs a shallow crawl (depth 1, 100 URLs) through Tor to discover immediate endpoints without deep spidering
+4. httpx probes discovered hosts at 3 threads and rate 5/s, collecting status codes, titles, tech stack, IPs, CNAMEs, and TLS info
+5. Katana performs a shallow crawl (depth 1, 100 URLs) to discover immediate endpoints without deep spidering
 6. GAU pulls up to 3000 historical URLs from Wayback, CommonCrawl, OTX, and URLScan -- zero target contact
 7. ParamSpider mines parameters from Wayback CDX archives
 8. jsluice extracts endpoints and secrets from up to 30 JS files found during crawling
 9. Arjun discovers parameters passively from archived responses
-10. Nuclei runs only critical templates at rate 5/s with concurrency 3 through Tor, excluding dos/fuzz/intrusive tags entirely
+10. Nuclei runs only critical templates at rate 5/s with concurrency 3, excluding dos/fuzz/intrusive tags entirely
 11. CVE lookup maps discovered services to known vulnerabilities (up to 20 CVEs per service)
 12. MITRE enrichment adds ATT&CK context to findings
 13. Shodan, URLScan, OTX, and Censys enrich all discovered assets through third-party APIs`,
@@ -60,9 +59,8 @@ Red team operators running authorized engagements where some active probing is a
     // Modules: vuln_scan included for critical-only Nuclei
     scanModules: ['domain_discovery', 'port_scan', 'http_probe', 'resource_enum', 'vuln_scan'],
 
-    // Stealth mode off (we handle throttling manually), Tor on
+    // Stealth mode off (we handle throttling manually)
     stealthMode: false,
-    useTorForRecon: true,
 
     // --- Subdomain Discovery: all passive, NO brute force ---
     subdomainDiscoveryEnabled: true,

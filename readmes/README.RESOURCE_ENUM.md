@@ -99,7 +99,6 @@ The `resource_enum.py` module provides comprehensive endpoint discovery and clas
 | **Parameter Classification** | Identifies sensitive params (id, file, auth, redirect, command) |
 | **Source Tracking** | Each endpoint tracked with `sources` array: `["katana", "hakrawler", "gau", "paramspider", "kiterunner", "jsluice", "arjun"]` |
 | **Docker Execution** | Runs via Docker for consistency |
-| **Tor Support** | Anonymous crawling via SOCKS proxy |
 | **Incremental Output** | Saves results as crawling progresses |
 
 ---
@@ -594,7 +593,6 @@ jsluice runs **sequentially after** the parallel crawling phase (Katana + Hakraw
 1. INITIALIZATION
    └── Check Docker availability
    └── Pull Katana + GAU + Kiterunner images in parallel
-   └── Check Tor availability (if enabled)
 
 2. TARGET EXTRACTION
    └── Get live URLs from http_probe
@@ -1209,9 +1207,6 @@ KATANA_JS_CRAWL = True
 
 # Reduce rate limit
 KATANA_RATE_LIMIT = 50
-
-# Use Tor for anonymous crawling
-USE_TOR_FOR_RECON = True
 ```
 
 #### "Too many URLs (noise)"
@@ -1379,7 +1374,6 @@ Run Kiterunner manually (binary auto-downloads to ~/.redamon/tools/kiterunner/):
 | Rate limiting/bans | Reduce `KATANA_RATE_LIMIT` and `KITERUNNER_RATE_LIMIT` |
 | WAF blocking | Use custom User-Agent, reduce rate |
 | API bruteforce detection | Lower `KITERUNNER_CONNECTIONS` and `KITERUNNER_THREADS` |
-| Detection | Use Tor proxy |
 | Legal issues | Only scan authorized targets |
 
 ### Safe Defaults

@@ -64,7 +64,6 @@ OSINT analysts, threat intelligence teams, or red team operators building a targ
     scanModules: ['domain_discovery', 'port_scan', 'resource_enum', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools, max limits ---
     subdomainDiscoveryEnabled: true,

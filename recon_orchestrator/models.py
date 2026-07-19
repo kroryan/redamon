@@ -25,6 +25,18 @@ class ReconStartRequest(BaseModel):
     webapp_api_url: str
 
 
+class CaptureProxyConfig(BaseModel):
+    """Optional runtime knobs for the capture proxy, from the Global Settings
+    toggle. The image is deliberately NOT here — it stays the trusted orchestrator
+    env so the operator toggle can never spawn an arbitrary container image."""
+    port: Optional[int] = None
+    maxBodyKb: Optional[int] = None
+    storeBodies: Optional[bool] = None
+    redactSecrets: Optional[bool] = None
+    scope: Optional[str] = None
+    blockedIps: Optional[str] = None
+
+
 class ReconState(BaseModel):
     """Current state of a recon process"""
     project_id: str

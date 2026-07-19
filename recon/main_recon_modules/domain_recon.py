@@ -77,37 +77,7 @@ def _annotate_ai_service_hint(dns_entry: dict, settings: dict | None) -> None:
         dns_entry['ai_service_hint'] = hint
 
 
-def get_tor_session(anonymous: bool):
-    """Get requests session, optionally through Tor."""
-    if anonymous:
-        try:
-            from recon.helpers.anonymity import get_tor_session, is_tor_running
-            if is_tor_running():
-                session = get_tor_session()
-                if session:
-                    return session
-            print("[!][Tor] Not available, using direct connection")
-        except ImportError:
-            print("[!][Tor] Anonymity module not found")
-    return requests.Session()
-
-
-def get_proxychains_prefix(anonymous: bool) -> list:
-    """Get proxychains command prefix if enabled."""
-    if anonymous:
-        try:
-            from recon.helpers.anonymity import get_proxychains_cmd, is_tor_running
-            if is_tor_running():
-                cmd = get_proxychains_cmd()
-                if cmd:
-                    print(f"[🧅] Using {cmd} for Knockpy")
-                    return [cmd, "-q"]
-        except ImportError:
-            pass
-    return []
-
-
-def query_crtsh(domain: str, anonymous: bool = False, settings: dict = None) -> dict:
+def query_crtsh(domain: str, settings: dict = None) -> dict:
     """Query crt.sh certificate transparency logs for subdomains.
 
     Thread-safe: creates its own requests.Session.
@@ -122,7 +92,7 @@ def query_crtsh(domain: str, anonymous: bool = False, settings: dict = None) -> 
         return {}
 
     sourced = {}
-    session = get_tor_session(anonymous)
+    session = requests.Session()
     try:
         print(f"[*][crt.sh] Querying certificate transparency logs...")
         crtsh_subs = set()
@@ -147,7 +117,7 @@ def query_crtsh(domain: str, anonymous: bool = False, settings: dict = None) -> 
     return sourced
 
 
-def query_hackertarget(domain: str, anonymous: bool = False, settings: dict = None) -> dict:
+def query_hackertarget(domain: str, settings: dict = None) -> dict:
     """Query HackerTarget API for subdomains.
 
     Thread-safe: creates its own requests.Session.
@@ -162,7 +132,7 @@ def query_hackertarget(domain: str, anonymous: bool = False, settings: dict = No
         return {}
 
     sourced = {}
-    session = get_tor_session(anonymous)
+    session = requests.Session()
     try:
         print(f"[*][HackerTarget] Querying host search API...")
         ht_subs = set()
@@ -194,14 +164,14 @@ def get_passive_subdomains(domain: str, session, settings: dict = None) -> dict:
     if settings is None:
         settings = {}
     sourced = {}
-    for s, sources in query_crtsh(domain, anonymous=False, settings=settings).items():
+    for s, sources in query_crtsh(domain, settings=settings).items():
         sourced.setdefault(s, set()).update(sources)
-    for s, sources in query_hackertarget(domain, anonymous=False, settings=settings).items():
+    for s, sources in query_hackertarget(domain, settings=settings).items():
         sourced.setdefault(s, set()).update(sources)
     return sourced
 
 
-def run_knockpy(domain: str, proxychains_prefix: list, bruteforce: bool = False, settings: dict = None) -> set:
+def run_knockpy(domain: str, bruteforce: bool = False, settings: dict = None) -> set:
     """Run Knockpy to get subdomains."""
     if settings is None:
         settings = {}
@@ -218,9 +188,7 @@ def run_knockpy(domain: str, proxychains_prefix: list, bruteforce: bool = False,
     command = ['knockpy', '-d', domain, '--recon']
     if bruteforce:
         command.append('--bruteforce')
-    if proxychains_prefix:
-        command = proxychains_prefix + command
-    
+
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=600)
         
@@ -737,7 +705,7 @@ def run_puredns_resolve(subdomains: list, domain: str, settings: dict = None) ->
                 )
 
 
-def discover_subdomains(domain: str, anonymous: bool = False, bruteforce: bool = False,
+def discover_subdomains(domain: str, bruteforce: bool = False,
                         resolve: bool = True, save_output: bool = True, project_id: str = None,
                         settings: dict = None) -> dict:
     """
@@ -745,7 +713,6 @@ def discover_subdomains(domain: str, anonymous: bool = False, bruteforce: bool =
 
     Args:
         domain: Target domain (e.g., "example.com")
-        anonymous: Use Tor to hide real IP
         bruteforce: Enable Knockpy bruteforce mode (slower but more thorough)
         resolve: Whether to resolve DNS for all hosts
         save_output: Whether to save JSON report
@@ -757,8 +724,6 @@ def discover_subdomains(domain: str, anonymous: bool = False, bruteforce: bool =
     """
     print(f"\n{'=' * 50}")
     print(f"[*][Discovery] TARGET: {domain}")
-    if anonymous:
-        print(f"[🧅] ANONYMOUS MODE")
     if bruteforce:
         print(f"[⚡] BRUTEFORCE MODE")
     print(f"{'=' * 50}\n")
@@ -796,18 +761,15 @@ def discover_subdomains(domain: str, anonymous: bool = False, bruteforce: bool =
             ],
         )
 
-    # Setup
-    pc_prefix = get_proxychains_prefix(anonymous)
-
     # Subdomain Discovery — fan-out all 5 tools in parallel
     print(f"[*][Discovery] Launching 5 discovery tools in parallel...")
     with ThreadPoolExecutor(max_workers=5, thread_name_prefix="discovery") as executor:
         futures = {
-            executor.submit(query_crtsh, domain, anonymous, settings): "crtsh",
-            executor.submit(query_hackertarget, domain, anonymous, settings): "hackertarget",
+            executor.submit(query_crtsh, domain, settings): "crtsh",
+            executor.submit(query_hackertarget, domain, settings): "hackertarget",
             executor.submit(run_subfinder, domain, settings): "subfinder",
             executor.submit(run_amass, domain, settings): "amass",
-            executor.submit(run_knockpy, domain, pc_prefix, bruteforce, settings): "knockpy",
+            executor.submit(run_knockpy, domain, bruteforce, settings): "knockpy",
         }
 
         discovery_results = {}
@@ -859,7 +821,7 @@ def discover_subdomains(domain: str, anonymous: bool = False, bruteforce: bool =
             "scan_type": "subdomain_dns_discovery",
             "scan_timestamp": datetime.now().isoformat(),
             "target_domain": domain,
-            "anonymous_mode": anonymous,
+            "anonymous_mode": False,
             "bruteforce_mode": bruteforce
         },
         "domain": domain,

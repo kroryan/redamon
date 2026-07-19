@@ -60,7 +60,6 @@ The `naabu_scan.py` module integrates ProjectDiscovery's Naabu scanner into RedA
 | **CDN Detection** | Identifies CDN-protected hosts (Cloudflare, Akamai, etc.) |
 | **Service Detection** | Maps common ports to service names |
 | **Docker Execution** | No local installation required |
-| **Tor Support** | Anonymous scanning via SOCKS proxy |
 | **Passive Mode** | Query Shodan InternetDB instead of active scanning |
 | **Incremental Saving** | Results saved progressively |
 
@@ -171,7 +170,6 @@ NAABU_CUSTOM_PORTS = "1-65535"    # Full port range
 | Stealth | 🥷 Stealthier | 👀 Easily detected |
 | Application logging | ❌ Usually not | ✅ Logged |
 | Requires root | ✅ Yes | ❌ No |
-| Works through proxy | ❌ No | ✅ Yes (SOCKS/Tor) |
 
 ### Performance Settings
 
@@ -393,7 +391,6 @@ When `NAABU_EXCLUDE_CDN = True`:
 1. INITIALIZATION
    └── Check Docker availability
    └── Pull Naabu image if needed
-   └── Check Tor availability (if enabled)
 
 2. TARGET EXTRACTION
    └── Parse recon_data JSON
@@ -605,7 +602,6 @@ NAABU_TOP_PORTS = "100"
 NAABU_RATE_LIMIT = 100
 NAABU_THREADS = 5
 NAABU_SCAN_TYPE = "c"  # CONNECT instead of SYN
-USE_TOR_FOR_RECON = True
 ```
 
 **Full Port Scan:**
@@ -695,7 +691,7 @@ docker run --rm --net=host \
 | Rate limiting/bans | Reduce `NAABU_RATE_LIMIT` |
 | IDS/IPS detection | Use CONNECT mode, lower rate |
 | CDN blocking | Use `NAABU_EXCLUDE_CDN = True` |
-| Detection | Use Tor, reduce rate limit |
+| Detection | Reduce rate limit |
 
 ### Safe Defaults
 
@@ -739,7 +735,6 @@ The `masscan_scan.py` module integrates Robert David Graham's Masscan — the fa
 | **Speed** | Fastest (10M+ pps capable) | Fast (1000s pps) |
 | **Best for** | Large CIDR ranges, bulk IP scanning | Hostname-based scanning, CDN detection |
 | **CDN Detection** | No | Built-in |
-| **Tor Support** | No (raw SYN packets) | Yes (via SOCKS proxy) |
 | **Passive Mode** | No | Yes (Shodan InternetDB) |
 | **Execution** | Native binary | Docker container |
 | **Banner Grabbing** | Optional (`--banners`) | No |
@@ -795,7 +790,7 @@ MASSCAN_CUSTOM_PORTS = "8080-8090"     # Port range
 - **Native binary** (built from source in multi-stage Dockerfile) instead of Docker-in-Docker for simplicity
 - **Results merged** into existing `port_scan` key so all downstream modules work unchanged
 - **Mock hostname detection** prevents invalid URLs in IP mode (e.g., `10-0-0-1` replaced with `10.0.0.1`)
-- **Incompatible with Tor** — raw SYN packets bypass the TCP stack and cannot be proxied
+- **Raw SYN packets** bypass the TCP stack for maximum scanning speed
 
 ---
 

@@ -41,7 +41,7 @@ const PRESETS_WITH_VHOSTSNI_ENABLED = [
 const PRESETS_EXPLICIT_DISABLE = [
   'full-passive-scan',      // "no packets to target" — preset's identity
   'osint-investigator',     // "no active scanning"
-  'stealth-recon',          // 2300+ probes through Tor = catastrophic
+  'stealth-recon',          // 2300+ probes = catastrophically slow and noisy
   'large-network',          // per-IP serial × thousands of IPs = days
 ] as const
 

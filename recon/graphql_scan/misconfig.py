@@ -115,9 +115,7 @@ def run_graphql_cop(
     # GraphQL endpoints. See recon/helpers/resource_enum/katana_helpers.py for
     # the long comment on sibling-container network isolation. Host networking
     # is also equivalent to bridge for external targets, so it's strictly an
-    # upgrade. `use_tor` is preserved separately to drive graphql-cop's `-T`
-    # flag (in-process Tor signaling), independent of the docker network mode.
-    use_tor = bool(settings.get('USE_TOR_FOR_RECON', False))
+    # upgrade.
     cmd = ['docker', 'run', '--rm', '--net=host', image,
            '-t', endpoint, '-o', 'json']
 
@@ -139,13 +137,6 @@ def run_graphql_cop(
     # One -H per header per graphql-cop's argparse (action='append').
     for k, v in (auth_headers or {}).items():
         cmd += ['-H', json.dumps({k: v})]
-
-    if use_tor:
-        cmd.append('-T')
-
-    proxy = settings.get('HTTP_PROXY')
-    if proxy:
-        cmd += ['-x', proxy]
 
     active_test_count = len(GRAPHQL_COP_TEST_TO_VULN_TYPE) - len(excluded_set)
     print(f"[*][GraphQL-Cop] {endpoint}  image={image}  tests={active_test_count}/12  timeout={timeout}s"

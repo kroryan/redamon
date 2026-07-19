@@ -23,7 +23,6 @@ def _crawl_single_url(
     allowed_hosts: set,
     custom_headers: List[str],
     exclude_patterns: List[str],
-    use_proxy: bool,
     shared_urls: set,
     urls_lock: threading.Lock,
     max_urls: int,
@@ -56,12 +55,17 @@ def _crawl_single_url(
     if include_subs:
         cmd.append("-subs")
 
-    if custom_headers:
-        header_str = ";;".join(custom_headers)
-        cmd.extend(["-h", header_str])
-
-    if use_proxy:
-        cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
+    # HTTP traffic capture (Phase 1): route through the capture proxy when
+    # enabled + reachable. The X-Redamon-Ctx tag is added ONLY in this routing
+    # branch (§20.2 no-leak). hakrawler joins headers with ';;' via -h.
+    _cap_headers = list(custom_headers) if custom_headers else []
+    from helpers.proxy_routing import get_capture_routing
+    _cap_url, _cap_token = get_capture_routing("hakrawler")
+    if _cap_url and _cap_token:
+        cmd.extend(["-proxy", _cap_url])
+        _cap_headers.append(f"X-Redamon-Ctx: {_cap_token}")
+    if _cap_headers:
+        cmd.extend(["-h", ";;".join(_cap_headers)])
 
     try:
         process = subprocess.Popen(
@@ -169,7 +173,6 @@ def run_hakrawler_crawler(
     allowed_hosts: set,
     custom_headers: List[str],
     exclude_patterns: List[str],
-    use_proxy: bool = False,
     parallelism: int = 4,
 ) -> Tuple[List[str], Dict]:
     """
@@ -191,7 +194,6 @@ def run_hakrawler_crawler(
         allowed_hosts: Set of hostnames for scope filtering
         custom_headers: Custom HTTP headers
         exclude_patterns: URL patterns to exclude
-        use_proxy: Whether to use Tor proxy
         parallelism: Number of URLs to crawl in parallel
 
     Returns:
@@ -223,7 +225,7 @@ def run_hakrawler_crawler(
                 _crawl_single_url,
                 url, docker_image, depth, threads, timeout,
                 include_subs, insecure, allowed_hosts, custom_headers,
-                exclude_patterns, use_proxy, discovered_urls, urls_lock, max_urls,
+                exclude_patterns, discovered_urls, urls_lock, max_urls,
             ): url
             for url in valid_urls
         }

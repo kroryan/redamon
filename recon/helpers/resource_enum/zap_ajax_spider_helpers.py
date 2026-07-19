@@ -405,7 +405,6 @@ def run_zap_ajax_spider(
     random_inputs,
     logout_avoidance,
     scope_check,
-    use_proxy=False,
     parallelism=1,
 ) -> tuple[List[str], Dict]:
     """Run ZAP Ajax Spider for seed URLs and return filtered discovered URLs."""
@@ -449,9 +448,6 @@ def run_zap_ajax_spider(
 
     for invalid in invalid_headers:
         print(f"[!][ZAP Ajax] Ignoring invalid custom header: {mask_zap_ajax_header_line(invalid)}")
-
-    if use_proxy:
-        print("[!][ZAP Ajax] ZAP Ajax Spider does not support the existing Tor proxy path in v1; continuing direct")
 
     metadata = {
         "seed_urls": len(seeds),

@@ -28,7 +28,6 @@ def run_paramspider_for_domain(
     domain: str,
     placeholder: str,
     timeout: int,
-    use_proxy: bool = False,
     tmp_dir: Path = None,
 ) -> List[str]:
     """
@@ -38,16 +37,12 @@ def run_paramspider_for_domain(
         domain: Target domain to query
         placeholder: Placeholder for parameter values (e.g., "FUZZ")
         timeout: Command timeout in seconds
-        use_proxy: Whether to use Tor SOCKS proxy
         tmp_dir: Working directory for output files
 
     Returns:
         List of discovered URLs with parameters
     """
     cmd = ['paramspider', '-d', domain, '-s', '-p', placeholder]
-
-    if use_proxy:
-        cmd.extend(['--proxy', '127.0.0.1:9050'])
 
     try:
         result = subprocess.run(
@@ -93,7 +88,6 @@ def run_paramspider_discovery(
     target_domains: Set[str],
     placeholder: str,
     timeout: int,
-    use_proxy: bool = False,
     workers: int = 5,
 ) -> Tuple[List[str], Dict[str, List[str]]]:
     """
@@ -103,7 +97,6 @@ def run_paramspider_discovery(
         target_domains: Set of domains to query
         placeholder: Placeholder for parameter values (default: "FUZZ")
         timeout: Per-domain timeout in seconds
-        use_proxy: Whether to use Tor proxy
 
     Returns:
         Tuple of (all_discovered_urls, urls_by_domain)
@@ -129,7 +122,6 @@ def run_paramspider_discovery(
                     domain=domain,
                     placeholder=placeholder,
                     timeout=timeout,
-                    use_proxy=use_proxy,
                     tmp_dir=tmp_dir,
                 )
                 future_to_domain[future] = domain

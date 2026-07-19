@@ -66,9 +66,8 @@ Red team operators in the pre-engagement phase, OSINT analysts building target p
     // No http_probe (sends requests), no js_recon (downloads files).
     scanModules: ['domain_discovery', 'port_scan', 'resource_enum', 'vuln_scan'],
 
-    // Stealth OFF (not needed -- nothing active), Tor OFF
+    // Stealth OFF (not needed -- nothing active)
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools enabled, Amass PASSIVE only ---
     subdomainDiscoveryEnabled: true,

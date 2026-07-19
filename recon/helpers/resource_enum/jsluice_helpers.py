@@ -111,7 +111,6 @@ def verify_jsluice_urls(
     rate_limit: int,
     accept_status: List[int],
     exclude_patterns: List[str] = None,
-    use_proxy: bool = False,
 ) -> Tuple[Set[str], Dict[str, int]]:
     """
     Verify jsluice-discovered URLs are live using httpx.
@@ -173,9 +172,6 @@ def verify_jsluice_urls(
             "-timeout", str(timeout),
             "-rl", str(rate_limit),
         ]
-
-        if use_proxy:
-            cmd.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -274,8 +270,7 @@ def run_jsluice_analysis(
     extract_secrets: bool,
     concurrency: int,
     parallelism: int = 3,
-    allowed_hosts: set = None,
-    use_proxy: bool = False
+    allowed_hosts: set = None
 ) -> Dict:
     """
     Analyze JavaScript files with jsluice to extract URLs, endpoints, and secrets.
@@ -291,7 +286,6 @@ def run_jsluice_analysis(
         extract_secrets: Whether to run jsluice secrets mode
         concurrency: Number of files to process concurrently
         allowed_hosts: Set of hostnames for scope filtering
-        use_proxy: Whether to use Tor proxy
 
     Returns:
         Dict with urls, secrets, and external_domains
@@ -314,7 +308,7 @@ def run_jsluice_analysis(
     result = {"urls": [], "secrets": [], "external_domains": []}
 
     try:
-        downloaded = _download_js_files(js_urls, work_dir, use_proxy)
+        downloaded = _download_js_files(js_urls, work_dir)
         if not downloaded:
             print("[-][jsluice] No JS files downloaded successfully")
             return result
@@ -507,25 +501,15 @@ def _is_js_url(url: str) -> bool:
 def _download_js_files(
     js_urls: List[str],
     work_dir: Path,
-    use_proxy: bool,
 ) -> Dict[str, str]:
     """Download JavaScript files to a local directory."""
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
 
-    if use_proxy:
-        proxy_handler = urllib.request.ProxyHandler({
-            'http': 'socks5://127.0.0.1:9050',
-            'https': 'socks5://127.0.0.1:9050'
-        })
-        opener = urllib.request.build_opener(
-            proxy_handler, urllib.request.HTTPSHandler(context=ssl_context)
-        )
-    else:
-        opener = urllib.request.build_opener(
-            urllib.request.HTTPSHandler(context=ssl_context)
-        )
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=ssl_context)
+    )
 
     downloaded = {}
     for i, url in enumerate(js_urls):

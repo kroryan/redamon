@@ -64,7 +64,6 @@ export function MasscanSection({ data, updateField, onRun }: MasscanSectionProps
           <p className={styles.sectionDescription}>
             High-speed SYN port scanner optimized for large networks and IP/CIDR ranges.
             Uses raw packets for maximum speed. Requires root or CAP_NET_RAW.
-            Incompatible with Tor (raw SYN packets bypass TCP stack).
           </p>
 
           {data.masscanEnabled && (

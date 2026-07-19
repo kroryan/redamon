@@ -665,13 +665,6 @@ class TestRunMasscanScan(unittest.TestCase):
         result = run_masscan_scan(data, settings={"MASSCAN_ENABLED": False})
         self.assertNotIn("masscan_scan", result)
 
-    def test_tor_skips(self):
-        settings = self._base_settings()
-        settings["USE_TOR_FOR_RECON"] = True
-        data = self._base_recon_data()
-        result = run_masscan_scan(data, settings=settings)
-        self.assertNotIn("masscan_scan", result)
-
     def test_missing_binary_skips(self):
         with patch.object(masscan_mod, "is_masscan_installed", return_value=False):
             data = self._base_recon_data()

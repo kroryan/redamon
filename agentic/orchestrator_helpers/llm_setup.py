@@ -421,6 +421,16 @@ def _resolve_provider_key(
 def apply_project_settings(orchestrator, project_id: str) -> None:
     """Load project settings from webapp API and reconfigure LLM if model changed."""
     settings = load_project_settings(project_id)
+
+    # HTTP traffic capture (Phase 1): per-project routing gate for the agent's
+    # target tools. When on, target-facing tool calls carry a signed X-Redamon-Ctx
+    # tag and route through the capture proxy (the kali MCP server does the actual
+    # rerouting; the agent only signs + tags).
+    if orchestrator.tool_executor:
+        orchestrator.tool_executor.set_capture_proxy_enabled(
+            bool(settings.get('CAPTURE_PROXY_ENABLED', False))
+        )
+
     new_model = settings.get('OPENAI_MODEL', 'claude-opus-4-6')
 
     # Re-run LLM setup if model changed OR if LLM is None (previous setup failed)

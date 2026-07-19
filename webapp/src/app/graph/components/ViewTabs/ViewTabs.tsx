@@ -457,7 +457,6 @@ export const ViewTabs = memo(function ViewTabs({
         </button>
         {/* Navigates to the dedicated AI Attack Surface page (not a graph view). */}
         <Link href="/ai-attack-surface" className={styles.tab}>
-          <span className={styles.newBadge}>New!</span>
           <Swords size={14} />
           <span>AI Gauntlet</span>
         </Link>

@@ -48,7 +48,6 @@ Cloud security engineers, red teams targeting cloud-hosted organizations, and se
     scanModules: ['domain_discovery', 'port_scan', 'http_probe', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools, high limits ---
     subdomainDiscoveryEnabled: true,

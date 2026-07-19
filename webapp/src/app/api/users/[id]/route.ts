@@ -150,9 +150,32 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // Collect this user's captured-traffic body refs BEFORE the cascade removes
+    // the rows (user -> projects -> captured rows), so we can GC the now-orphaned
+    // blobs afterward (§6.6). Prisma cascade never touches the filesystem.
+    let capturedBodyRefs: (string | null)[] = []
+    try {
+      const doomed = await prisma.capturedHttpTransaction.findMany({
+        where: { userId: id }, select: { reqBodyRef: true, respBodyRef: true },
+      })
+      capturedBodyRefs = doomed.flatMap(r => [r.reqBodyRef, r.respBodyRef])
+    } catch (e) {
+      console.warn('Could not enumerate captured body refs before user delete:', e)
+    }
+
     await prisma.user.delete({
       where: { id }
     })
+
+    if (capturedBodyRefs.length > 0) {
+      try {
+        const { gcOrphanBodies } = await import('@/lib/captureBodies')
+        const gc = await gcOrphanBodies(capturedBodyRefs)
+        if (gc.deleted > 0) console.log(`[user-delete] GC'd ${gc.deleted} captured body blobs for user ${id}`)
+      } catch (e) {
+        console.warn('Captured body-blob GC failed on user delete:', e)
+      }
+    }
 
     return NextResponse.json({ success: true })
   } catch (error: unknown) {

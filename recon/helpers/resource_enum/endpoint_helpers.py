@@ -12,15 +12,13 @@ from .katana_helpers import fetch_forms_from_urls
 
 
 def organize_endpoints(
-    discovered_urls: List[str],
-    use_proxy: bool = False
+    discovered_urls: List[str]
 ) -> Dict:
     """
     Organize discovered URLs into structured endpoint data.
 
     Args:
         discovered_urls: List of URLs discovered by Katana
-        use_proxy: Whether to use Tor proxy for form fetching
 
     Returns:
         Structured endpoint data organized by base URL
@@ -29,7 +27,7 @@ def organize_endpoints(
     by_base_url = {}  # base_url -> {path -> endpoint_info}
 
     # Fetch forms directly from discovered URLs (since http_probe doesn't keep body)
-    all_forms = fetch_forms_from_urls(discovered_urls, use_proxy=use_proxy, max_urls=100)
+    all_forms = fetch_forms_from_urls(discovered_urls, max_urls=100)
 
     # Process each discovered URL
     for url in discovered_urls:

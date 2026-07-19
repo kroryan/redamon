@@ -37,10 +37,18 @@ from recon.project_settings import get_settings
 # downstream consumer (full pipeline + every partial recon module) gets them.
 _settings = get_settings()
 
+# HTTP traffic capture (Phase 1): configure capture-proxy routing once, up front,
+# so every recon HTTP tool that supports it routes through the proxy when the
+# per-project gate is on and the proxy is reachable (else runs direct, §20.1).
+try:
+    from helpers.proxy_routing import configure as _configure_capture_routing
+    _configure_capture_routing(_settings)
+except Exception as _cap_cfg_err:  # noqa: BLE001 — never block a scan on this
+    print(f"[!][capture] routing not configured: {_cap_cfg_err}")
+
 # Extract commonly used settings as module-level variables for compatibility
 TARGET_DOMAIN = _settings['TARGET_DOMAIN']
 SUBDOMAIN_LIST = _settings['SUBDOMAIN_LIST']
-USE_TOR_FOR_RECON = _settings['USE_TOR_FOR_RECON']
 USE_BRUTEFORCE_FOR_SUBDOMAINS = _settings['USE_BRUTEFORCE_FOR_SUBDOMAINS']
 SCAN_MODULES = _settings['SCAN_MODULES']
 UPDATE_GRAPH_DB = _settings['UPDATE_GRAPH_DB']
@@ -693,7 +701,7 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
             "ip_to_hostname": ip_to_hostname,
             "filtered_mode": True,
             "subdomain_filter": subdomain_filter,
-            "anonymous_mode": settings.get('USE_TOR_FOR_RECON', False),
+            "anonymous_mode": False,
             "bruteforce_mode": False,
             "modules_executed": ["ip_recon", "reverse_dns"],
         },
@@ -1003,7 +1011,7 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
     return combined_result
 
 
-def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = False,
+def run_domain_recon(target: str, bruteforce: bool = False,
                      target_info: dict = None) -> dict:
     """
     Run combined WHOIS + subdomain discovery + DNS resolution.
@@ -1015,7 +1023,6 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
 
     Args:
         target: Root domain (e.g., "vulnweb.com", "example.com")
-        anonymous: Use Tor to hide real IP
         bruteforce: Enable Knockpy bruteforce mode (only for full discovery mode)
         target_info: Parsed target info from parse_target()
 
@@ -1067,7 +1074,7 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
             "project_id": PROJECT_ID,
             "filtered_mode": filtered_mode,
             "subdomain_filter": full_subdomains if filtered_mode else [],
-            "anonymous_mode": anonymous,
+            "anonymous_mode": False,
             "bruteforce_mode": bruteforce if not filtered_mode else False,
             "modules_executed": []
         },
@@ -1159,7 +1166,7 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
             if _settings.get('SUBDOMAIN_DISCOVERY_ENABLED', True):
                 g1_futures["discovery"] = g1_exec.submit(
                     discover_subdomains, root_domain,
-                    anonymous=anonymous, bruteforce=bruteforce,
+                    bruteforce=bruteforce,
                     resolve=dns_enabled, save_output=False, settings=_settings
                 )
             else:
@@ -1706,7 +1713,6 @@ def main():
     print(f"  [*][Pipeline] TARGET_DOMAIN:     {TARGET_DOMAIN}")
     print(f"  [*][Pipeline] SUBDOMAIN_LIST:    {SUBDOMAIN_LIST if SUBDOMAIN_LIST else '[] (full discovery)'}")
     print(f"  [*][Pipeline] SCAN_MODULES:      {','.join(SCAN_MODULES) if isinstance(SCAN_MODULES, list) else SCAN_MODULES}")
-    print(f"  [*][Pipeline] USE_TOR_FOR_RECON: {USE_TOR_FOR_RECON}")
     print(f"  [*][Pipeline] STEALTH_MODE:      {_settings.get('STEALTH_MODE', False)}")
     print(f"  [*][Pipeline] UPDATE_GRAPH_DB:   {UPDATE_GRAPH_DB}")
     print(f"  [*][Pipeline] USER_ID:           {USER_ID}")
@@ -1749,21 +1755,12 @@ def main():
         except Exception as e:
             print(f"[!][graph-db] Failed to clear previous graph data: {e}\n")
 
-    # Check anonymity status if Tor is enabled
-    if USE_TOR_FOR_RECON:
-        try:
-            from recon.helpers.anonymity import print_anonymity_status
-            print_anonymity_status()
-        except ImportError:
-            print("[!][Pipeline] Anonymity module not found, proceeding without Tor status check")
-
     # Phase 1 & 2: Domain recon (WHOIS + Subdomains + DNS) - Combined JSON
     output_file = Path(__file__).parent / "output" / f"recon_{PROJECT_ID}.json"
 
     if "domain_discovery" in SCAN_MODULES:
         domain_result = run_domain_recon(
             TARGET_DOMAIN,
-            anonymous=USE_TOR_FOR_RECON,
             bruteforce=USE_BRUTEFORCE_FOR_SUBDOMAINS,
             target_info=target_info
         )

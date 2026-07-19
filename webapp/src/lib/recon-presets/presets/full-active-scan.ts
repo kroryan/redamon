@@ -34,7 +34,7 @@ Pentesters with full authorization on an engagement where stealth is irrelevant.
 - ParamSpider (Wayback parameter mining) - passive source
 - All OSINT enrichment (Shodan, URLScan, OTX, Censys, FOFA, Netlas, VirusTotal, ZoomEye, CriminalIP, Uncover) - passive sources
 - jsReconIncludeArchivedJs disabled (Wayback archived JS is a passive source)
-- Stealth mode and Tor routing - contradicts active scanning goal
+- Stealth mode - contradicts active scanning goal
 - Naabu passive mode (InternetDB) - we want real SYN scanning
 
 ### How it works
@@ -53,9 +53,8 @@ Pentesters with full authorization on an engagement where stealth is irrelevant.
     // All scan modules enabled including js_recon (actively crawls and downloads JS files)
     scanModules: ['domain_discovery', 'port_scan', 'http_probe', 'resource_enum', 'vuln_scan', 'js_recon'],
 
-    // Stealth OFF, Tor OFF
+    // Stealth OFF
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools enabled, Amass in active + brute mode ---
     subdomainDiscoveryEnabled: true,

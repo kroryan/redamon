@@ -45,7 +45,6 @@ Security teams running compliance audits, blue teamers validating hardening base
     scanModules: ['domain_discovery', 'http_probe', 'vuln_scan'],
 
     stealthMode: false,
-    useTorForRecon: false,
 
     // --- Subdomain Discovery: all tools, default limits ---
     subdomainDiscoveryEnabled: true,

@@ -5,9 +5,9 @@ export const STEALTH_RECON: ReconPreset = {
   name: 'Stealth Recon',
   icon: '',
   image: '/preset-ghost.svg',
-  shortDescription: 'Minimal detection footprint. All traffic routed through Tor, passive tools preferred, extremely low rate limits on active probes. Designed for targets with aggressive monitoring.',
+  shortDescription: 'Minimal detection footprint. Passive tools preferred, extremely low rate limits on active probes. Designed for targets with aggressive monitoring.',
   fullDescription: `### Pipeline Goal
-Gather intelligence with the smallest possible detection footprint. All traffic is routed through Tor, active tools are throttled to near-passive levels, and anything that generates noisy traffic patterns (brute force, fuzzing, aggressive crawling) is disabled entirely. The goal is to learn as much as possible while staying below the target's detection threshold.
+Gather intelligence with the smallest possible detection footprint. Active tools are throttled to near-passive levels, and anything that generates noisy traffic patterns (brute force, fuzzing, aggressive crawling) is disabled entirely. The goal is to learn as much as possible while staying below the target's detection threshold.
 
 ### Who is this for?
 Red team operators performing authorized reconnaissance against targets with active SOC monitoring, IDS/IPS, or WAF rate limiting. Also useful for initial recon when you need to avoid triggering alerts before the engagement formally begins, or when testing detection capabilities of a blue team.
@@ -42,12 +42,12 @@ Red team operators performing authorized reconnaissance against targets with act
 1. Subdomain discovery runs entirely through passive sources -- certificate logs, DNS databases, and OSINT APIs
 2. DNS resolution and Puredns filtering use public resolvers only
 3. Naabu queries Shodan InternetDB for known open ports without sending any packets
-4. httpx probes discovered hosts at a trickle (1 thread, 2 req/s) through Tor, collecting only essential metadata
-5. Katana performs a shallow crawl (depth 1, 50 URLs) through Tor to discover immediate endpoints
+4. httpx probes discovered hosts at a trickle (1 thread, 2 req/s), collecting only essential metadata
+5. Katana performs a shallow crawl (depth 1, 50 URLs) to discover immediate endpoints
 6. GAU and ParamSpider pull historical URLs and parameters from web archives -- zero target contact
 7. jsluice extracts endpoints from up to 20 JS files found during crawling
 8. Arjun discovers parameters passively from archived responses
-9. Nuclei runs only critical/high templates at 5 req/s through Tor, with intrusive and fuzzing templates excluded
+9. Nuclei runs only critical/high templates at 5 req/s, with intrusive and fuzzing templates excluded
 10. OSINT providers enrich all discovered assets through third-party APIs at reduced query limits
 11. CVE and MITRE enrichment map services to known vulnerabilities offline`,
   parameters: {
@@ -56,9 +56,8 @@ Red team operators performing authorized reconnaissance against targets with act
     // actually execute. No js_recon (too many downloads).
     scanModules: ['domain_discovery', 'port_scan', 'http_probe', 'resource_enum', 'vuln_scan'],
 
-    // Stealth + Tor: core of this preset
+    // Stealth: core of this preset
     stealthMode: true,
-    useTorForRecon: true,
 
     // --- Subdomain Discovery: all passive, NO brute force ---
     subdomainDiscoveryEnabled: true,
@@ -130,7 +129,7 @@ Red team operators performing authorized reconnaissance against targets with act
     // --- DISABLE Hakrawler ---
     hakrawlerEnabled: false,
 
-    // --- DISABLE ZAP Ajax Spider (browser crawling is loud and incompatible with Tor) ---
+    // --- DISABLE ZAP Ajax Spider (browser crawling is loud) ---
     zapAjaxSpiderEnabled: false,
 
     // --- GAU: passive archive discovery, all providers ---
@@ -180,8 +179,8 @@ Red team operators performing authorized reconnaissance against targets with act
     nucleiScanAllIps: false,
     nucleiExcludeTags: ['dos', 'fuzz', 'intrusive', 'sqli', 'rce'],
 
-    // --- VHost & SNI: explicitly disabled — 2300+ probes through Tor would be both
-    //     catastrophically slow AND noisy in Tor exit-node logs ---
+    // --- VHost & SNI: explicitly disabled — 2300+ probes would be both
+    //     catastrophically slow AND noisy ---
     vhostSniEnabled: false,
 
     // --- Subdomain Takeover: passive DNS-only (subjack), disable active Nuclei templates ---
