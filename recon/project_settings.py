@@ -320,6 +320,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'KATANA_PARALLELISM': 8,
     'KATANA_CONCURRENCY': 15,
 
+    # HTTP Traffic Capture (mitmproxy integration, Phase 0+)
+    # Off by default: when off, recon does not retain httpx bodies and posts
+    # nothing to the /traffic store. Turning it on makes recon persist probed
+    # transactions (metadata + capped bodies) to Postgres via the webapp.
+    'CAPTURE_PROXY_ENABLED': False,
+
     # ZAP Ajax Spider Browser Crawler
     'ZAP_AJAX_SPIDER_ENABLED': False,
     'ZAP_AJAX_SPIDER_DOCKER_IMAGE': 'ghcr.io/zaproxy/zaproxy:stable',
@@ -1067,6 +1073,9 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['KATANA_CUSTOM_HEADERS'] = project.get('katanaCustomHeaders', DEFAULT_SETTINGS['KATANA_CUSTOM_HEADERS'])
     settings['KATANA_PARALLELISM'] = project.get('katanaParallelism', DEFAULT_SETTINGS['KATANA_PARALLELISM'])
     settings['KATANA_CONCURRENCY'] = project.get('katanaConcurrency', DEFAULT_SETTINGS['KATANA_CONCURRENCY'])
+
+    # HTTP Traffic Capture (mitmproxy integration, Phase 0+)
+    settings['CAPTURE_PROXY_ENABLED'] = project.get('captureProxyEnabled', DEFAULT_SETTINGS['CAPTURE_PROXY_ENABLED'])
 
     # ZAP Ajax Spider Browser Crawler
     settings['ZAP_AJAX_SPIDER_ENABLED'] = project.get('zapAjaxSpiderEnabled', DEFAULT_SETTINGS['ZAP_AJAX_SPIDER_ENABLED'])

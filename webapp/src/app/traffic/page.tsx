@@ -1,0 +1,340 @@
+'use client'
+
+import { useCallback, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Network } from 'lucide-react'
+import { useProject } from '@/providers/ProjectProvider'
+import { Drawer, useToast } from '@/components/ui'
+import {
+  useTrafficList,
+  useTrafficFacets,
+  useTrafficDetail,
+  DEFAULT_FILTERS,
+  type TrafficFilters,
+  type TrafficRow,
+  type TrafficDetail,
+} from './hooks/useTrafficData'
+import styles from './page.module.css'
+
+const SORT_COLUMNS = new Set(['startedAt', 'statusCode', 'host', 'tool', 'method', 'respBodySize', 'responseTimeMs', 'source'])
+
+function statusClassName(code: number | null): string {
+  if (code == null) return ''
+  if (code >= 500) return styles.status5xx
+  if (code >= 400) return styles.status4xx
+  if (code >= 300) return styles.status3xx
+  if (code >= 200) return styles.status2xx
+  return ''
+}
+
+function fmtTime(iso: string): string {
+  try { return new Date(iso).toLocaleString() } catch { return iso }
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+function toCurl(d: TrafficDetail): string {
+  const url = `${d.scheme}://${d.host}${d.port && d.port !== 80 && d.port !== 443 ? ':' + d.port : ''}${d.path}${d.query || ''}`
+  const parts = [`curl -i -X ${d.method}`]
+  const headers = d.reqHeaders && typeof d.reqHeaders === 'object' ? d.reqHeaders : {}
+  for (const [k, v] of Object.entries(headers)) {
+    parts.push(`-H '${k}: ${String(v).replace(/'/g, "'\\''")}'`)
+  }
+  if (d.reqBody) parts.push(`--data-raw '${d.reqBody.replace(/'/g, "'\\''")}'`)
+  parts.push(`'${url.replace(/'/g, "'\\''")}'`)
+  return parts.join(' \\\n  ')
+}
+
+export default function TrafficPage() {
+  const { projectId, isLoading: projectLoading } = useProject()
+  const router = useRouter()
+  const toast = useToast()
+
+  const [filters, setFilters] = useState<TrafficFilters>(DEFAULT_FILTERS)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const list = useTrafficList(projectId, filters)
+  const facets = useTrafficFacets(projectId)
+  const detail = useTrafficDetail(projectId, selectedId)
+
+  // Any filter change resets to the first page.
+  const patch = useCallback((p: Partial<TrafficFilters>) => {
+    setFilters(prev => ({ ...prev, ...p, page: 'page' in p ? (p.page as number) : 0 }))
+  }, [])
+
+  const toggleSort = useCallback((col: string) => {
+    if (!SORT_COLUMNS.has(col)) return
+    setFilters(prev => ({
+      ...prev,
+      sort: col,
+      dir: prev.sort === col && prev.dir === 'desc' ? 'asc' : 'desc',
+      page: 0,
+    }))
+  }, [])
+
+  const rows = list.data?.rows ?? []
+  const total = list.data?.total ?? 0
+  const pageCount = Math.max(1, Math.ceil(total / filters.pageSize))
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0
+    if (filters.from) n++
+    if (filters.to) n++
+    if (filters.source !== 'both') n++
+    if (filters.tool.length) n++
+    if (filters.host) n++
+    if (filters.method) n++
+    if (filters.statusClass) n++
+    if (filters.q) n++
+    if (filters.runId) n++
+    if (filters.sessionId) n++
+    if (filters.hasSetCookie) n++
+    if (filters.reflected) n++
+    if (filters.only5xx) n++
+    return n
+  }, [filters])
+
+  if (!projectLoading && !projectId) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.noProject}>
+          <Network size={48} strokeWidth={1.5} />
+          <div className={styles.noProjectTitle}>No Project Selected</div>
+          <div className={styles.noProjectText}>
+            Select a project from the header to view captured HTTP traffic.
+          </div>
+          <button className="primaryButton" onClick={() => router.push('/projects')}>
+            Go to Projects
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <div className={styles.title}>
+          <Network size={18} /> Traffic
+        </div>
+        <span className={styles.subtitle}>Captured HTTP transactions</span>
+        <div className={styles.spacer} />
+        <span className={styles.count}>{total.toLocaleString()} transactions</span>
+      </div>
+
+      {/* Filters */}
+      <div className={styles.filters}>
+        <div className={styles.field}>
+          <label>From</label>
+          <input className={styles.input} type="date" value={filters.from}
+            onChange={e => patch({ from: e.target.value })} />
+        </div>
+        <div className={styles.field}>
+          <label>To</label>
+          <input className={styles.input} type="date" value={filters.to}
+            onChange={e => patch({ to: e.target.value })} />
+        </div>
+        <div className={styles.field}>
+          <label>Source</label>
+          <select className={styles.select} value={filters.source}
+            onChange={e => patch({ source: e.target.value })}>
+            <option value="both">Both</option>
+            <option value="recon">Recon</option>
+            <option value="agent">Agent</option>
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label>Tool</label>
+          <select className={styles.select} value={filters.tool[0] || ''}
+            onChange={e => patch({ tool: e.target.value ? [e.target.value] : [] })}>
+            <option value="">All</option>
+            {(facets.data?.tools ?? []).map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label>Host</label>
+          <select className={styles.select} value={filters.host}
+            onChange={e => patch({ host: e.target.value })}>
+            <option value="">All</option>
+            {(facets.data?.hosts ?? []).map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label>Method</label>
+          <select className={styles.select} value={filters.method}
+            onChange={e => patch({ method: e.target.value })}>
+            <option value="">All</option>
+            {['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'].map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label>Status</label>
+          <select className={styles.select} value={filters.statusClass}
+            onChange={e => patch({ statusClass: e.target.value })}>
+            <option value="">All</option>
+            <option value="2xx">2xx</option>
+            <option value="3xx">3xx</option>
+            <option value="4xx">4xx</option>
+            <option value="5xx">5xx</option>
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label>Run</label>
+          <select className={styles.select} value={filters.runId}
+            onChange={e => patch({ runId: e.target.value })}>
+            <option value="">All</option>
+            {(facets.data?.runs ?? []).map(r => <option key={r} value={r}>{r.slice(0, 8)}</option>)}
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label>Search URL</label>
+          <input className={styles.input} type="text" placeholder="host / path"
+            value={filters.q} onChange={e => patch({ q: e.target.value })} />
+        </div>
+
+        <div className={styles.toggles}>
+          <label className={styles.toggleItem}>
+            <input type="checkbox" checked={filters.hasSetCookie}
+              onChange={e => patch({ hasSetCookie: e.target.checked })} /> Set-Cookie
+          </label>
+          <label className={styles.toggleItem}>
+            <input type="checkbox" checked={filters.only5xx}
+              onChange={e => patch({ only5xx: e.target.checked, statusClass: '' })} /> 5xx only
+          </label>
+        </div>
+
+        {activeFilterCount > 0 && (
+          <button className={styles.clearBtn} onClick={() => setFilters(DEFAULT_FILTERS)}>
+            Clear ({activeFilterCount})
+          </button>
+        )}
+      </div>
+
+      {/* Table */}
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th className={styles.sortable} onClick={() => toggleSort('startedAt')}>Time{filters.sort === 'startedAt' ? (filters.dir === 'desc' ? ' ↓' : ' ↑') : ''}</th>
+              <th className={styles.sortable} onClick={() => toggleSort('source')}>Source</th>
+              <th className={styles.sortable} onClick={() => toggleSort('tool')}>Tool</th>
+              <th className={styles.sortable} onClick={() => toggleSort('method')}>Method</th>
+              <th className={styles.sortable} onClick={() => toggleSort('host')}>Host</th>
+              <th>Path</th>
+              <th className={styles.sortable} onClick={() => toggleSort('statusCode')}>Status</th>
+              <th className={styles.sortable} onClick={() => toggleSort('respBodySize')}>Length</th>
+              <th className={styles.sortable} onClick={() => toggleSort('responseTimeMs')}>Time (ms)</th>
+              <th>Flags</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r: TrafficRow) => (
+              <tr key={r.id} className={styles.row} onClick={() => setSelectedId(r.id)}>
+                <td>{fmtTime(r.startedAt)}</td>
+                <td>
+                  <span className={`${styles.badge} ${r.source === 'recon' ? styles.badgeRecon : styles.badgeAgent}`}>
+                    {r.source}
+                  </span>
+                </td>
+                <td>{r.tool || '—'}</td>
+                <td className={styles.mono}>{r.method}</td>
+                <td>{r.host}</td>
+                <td className={styles.pathCell} title={`${r.path}${r.query || ''}`}>
+                  {r.path}{r.query || ''}
+                </td>
+                <td className={`${styles.mono} ${statusClassName(r.statusCode)}`}>{r.statusCode ?? (r.blocked ? 'BLK' : '—')}</td>
+                <td>{fmtBytes(r.respBodySize)}</td>
+                <td>{r.responseTimeMs ?? '—'}</td>
+                <td>
+                  <span className={styles.flags}>
+                    {r.hasSetCookie && <span className={styles.flag}>cookie</span>}
+                    {r.reflectedParams && <span className={`${styles.flag} ${styles.flagWarn}`}>reflect</span>}
+                    {r.isReplay && <span className={styles.flag}>replay</span>}
+                    {!r.inScope && <span className={`${styles.flag} ${styles.flagWarn}`}>oos</span>}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {list.isLoading && <div className={styles.loading}>Loading…</div>}
+        {!list.isLoading && rows.length === 0 && (
+          <div className={styles.empty}>
+            No captured traffic yet. Enable capture on the project and run a recon scan.
+          </div>
+        )}
+      </div>
+
+      {/* Pagination */}
+      <div className={styles.pagination}>
+        <button className={styles.pageBtn} disabled={filters.page <= 0}
+          onClick={() => patch({ page: filters.page - 1 })}>Prev</button>
+        <span className={styles.pageInfo}>Page {filters.page + 1} of {pageCount}</span>
+        <button className={styles.pageBtn} disabled={filters.page + 1 >= pageCount}
+          onClick={() => patch({ page: filters.page + 1 })}>Next</button>
+        <select className={styles.select} value={filters.pageSize}
+          onChange={e => patch({ pageSize: parseInt(e.target.value, 10) })}>
+          {[25, 50, 100, 200].map(s => <option key={s} value={s}>{s} / page</option>)}
+        </select>
+      </div>
+
+      {/* Detail drawer */}
+      <Drawer
+        isOpen={!!selectedId}
+        onClose={() => setSelectedId(null)}
+        position="right"
+        mode="overlay"
+        width="620px"
+        resizable
+        title="Transaction detail"
+      >
+        {detail.isLoading && <div className={styles.loading}>Loading…</div>}
+        {detail.data && (
+          <div className={styles.detail}>
+            <div className={styles.detailSection}>
+              <div className={styles.detailLabel}>Request</div>
+              <dl className={styles.kv}>
+                <dt>URL</dt>
+                <dd className={styles.mono}>
+                  {detail.data.scheme}://{detail.data.host}
+                  {detail.data.port !== 80 && detail.data.port !== 443 ? `:${detail.data.port}` : ''}
+                  {detail.data.path}{detail.data.query || ''}
+                </dd>
+                <dt>Method</dt><dd className={styles.mono}>{detail.data.method}</dd>
+                <dt>Source</dt><dd>{detail.data.source}{detail.data.tool ? ` · ${detail.data.tool}` : ''}</dd>
+                {detail.data.runId && (<><dt>Run</dt><dd className={styles.mono}>{detail.data.runId}</dd></>)}
+                {detail.data.sessionId && (<><dt>Session</dt><dd className={styles.mono}>{detail.data.sessionId}</dd></>)}
+                {detail.data.targetIp && (<><dt>Target IP</dt><dd className={styles.mono}>{detail.data.targetIp}</dd></>)}
+                {detail.data.tlsVersion && (<><dt>TLS</dt><dd>{detail.data.tlsVersion}</dd></>)}
+              </dl>
+              <button className={styles.copyBtn} onClick={() => {
+                navigator.clipboard.writeText(toCurl(detail.data as TrafficDetail))
+                toast.success('Copied curl command')
+              }}>Copy as curl</button>
+            </div>
+
+            <div className={styles.detailSection}>
+              <div className={styles.detailLabel}>
+                Response — {detail.data.statusCode ?? (detail.data.blocked ? 'blocked' : 'no status')}
+                {' · '}{fmtBytes(detail.data.respBodySize)}
+                {detail.data.respContentType ? ` · ${detail.data.respContentType}` : ''}
+              </div>
+              <div className={styles.detailLabel}>Response headers</div>
+              <pre className={styles.pre}>{JSON.stringify(detail.data.respHeaders ?? {}, null, 2)}</pre>
+              <div className={styles.detailLabel}>
+                Response body{detail.data.respBodyRef ? ' (offloaded — Phase 1)' : ''}
+              </div>
+              {/* Rendered as inert text — never HTML. Captured bodies are attacker-controlled (§15.6). */}
+              <pre className={styles.pre}>{detail.data.respBody ?? (detail.data.respBodyRef ? '[body stored on disk]' : '[no body]')}</pre>
+            </div>
+          </div>
+        )}
+      </Drawer>
+    </div>
+  )
+}

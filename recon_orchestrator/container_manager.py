@@ -499,6 +499,11 @@ class ContainerManager:
         # Memory admission (Part 1): reserve this scan's RAM envelope or reject.
         await self._admit_scan("full_recon", project_id, user_id=user_id)
 
+        # Mint a run id for this full-recon scan. Full recon had no run id (unlike
+        # partial/ai-attack); the HTTP traffic-capture layer tags every captured
+        # transaction with it so the /traffic UI can group "this scan's traffic".
+        recon_run_id = str(uuid.uuid4())
+
         # Clean up any existing container
         container_name = self._get_container_name(project_id)
         try:
@@ -548,6 +553,7 @@ class ContainerManager:
                     # shipped-only allowlist). Server-controlled; forwarded to the
                     # recon pipeline so air-gapped/private-registry deployments work.
                     "RECON_EXTRA_ALLOWED_IMAGES": os.environ.get("RECON_EXTRA_ALLOWED_IMAGES", ""),
+                    "RECON_RUN_ID": recon_run_id,
                     "UPDATE_GRAPH_DB": "true",
                     # HOST_RECON_OUTPUT_PATH: Required for nested Docker containers (naabu, httpx, etc.)
                     # These run as sibling containers and need host paths for volume mounts

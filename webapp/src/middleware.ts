@@ -20,6 +20,8 @@ const INTERNAL_ALLOWLIST: { method: string; pattern: RegExp }[] = [
   { method: 'ANY', pattern: /^\/api\/conversations\/by-session\// },
   { method: 'ANY', pattern: /^\/api\/remediations(\/|$)/ },
   { method: 'GET', pattern: /^\/api\/global\/tunnel-config$/ },
+  // Captured HTTP traffic ingest (recon via scanner key, agent via internal key).
+  { method: 'POST', pattern: /^\/api\/traffic\/[^/]+\/ingest$/ },
 ]
 
 // Fail-open rollout: default log-only (never blocks), so an omitted route shows
@@ -40,6 +42,9 @@ export function internalKeyRouteAllowed(method: string, pathname: string): boole
 const SCANNER_ALLOWLIST: { method: string; pattern: RegExp }[] = [
   { method: 'GET', pattern: /^\/api\/users\/[^/]+\/settings$/ },
   { method: 'GET', pattern: /^\/api\/projects\/[^/]+$/ },
+  // Recon POSTs captured HTTP transactions here (Phase 0 traffic capture). The
+  // route handler resolves the tenant from the project owner, never the body.
+  { method: 'POST', pattern: /^\/api\/traffic\/[^/]+\/ingest$/ },
 ]
 
 export function scannerKeyRouteAllowed(method: string, pathname: string): boolean {

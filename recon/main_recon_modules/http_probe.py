@@ -1900,6 +1900,15 @@ def run_http_probe(recon_data: dict, output_file: Path = None, settings: dict = 
         # Enhance with Wappalyzer (uses existing HTML from httpx)
         httpx_results = enhance_with_wappalyzer(httpx_results, settings)
 
+        # HTTP traffic capture (Phase 0): persist full request/response transactions
+        # to the /traffic store BEFORE the bodies are dropped below. No-op unless
+        # CAPTURE_PROXY_ENABLED is on; best-effort (never breaks the scan).
+        try:
+            from helpers.traffic_capture import capture_httpx_transactions
+            capture_httpx_transactions(httpx_results, settings)
+        except Exception as _capture_err:  # noqa: BLE001
+            print(f"[!][traffic-capture] skipped: {_capture_err}")
+
         # Remove body from results to keep JSON small (already used for analysis)
         for url_data in httpx_results.get("by_url", {}).values():
             url_data.pop("body", None)
