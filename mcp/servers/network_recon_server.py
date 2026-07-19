@@ -900,6 +900,12 @@ def execute_wpscan(args: str, _redamon_ctx: str = "") -> str:
         _cap_url, _cap_tok = agent_capture_routing(_redamon_ctx)
         if _cap_url and _cap_tok:
             cmd_args = cmd_args + ["--proxy", _cap_url]
+            # The capture proxy MITMs TLS with its own (untrusted) CA; without this
+            # wpscan aborts every https request on a cert error and NOTHING is
+            # captured. Added only in the capture branch, so non-capture wpscan keeps
+            # strict TLS validation.
+            if "--disable-tls-checks" not in cmd_args:
+                cmd_args = cmd_args + ["--disable-tls-checks"]
             _tag = f"X-Redamon-Ctx: {_cap_tok}"
             for _i, _a in enumerate(cmd_args):
                 if _a == "--headers" and _i + 1 < len(cmd_args):
