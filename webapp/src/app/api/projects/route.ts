@@ -25,6 +25,7 @@ export async function GET() {
         name: true,
         description: true,
         targetDomain: true,
+        captureProxyEnabled: true,
         createdAt: true,
         updatedAt: true,
         user: {

@@ -13,6 +13,7 @@ import { TradecraftResourceList } from '@/components/settings/TradecraftResource
 import { PROVIDER_TYPES } from '@/lib/llmProviderPresets'
 import { Modal } from '@/components/ui/Modal/Modal'
 import { useAlertModal, useToast, WikiInfoButton, Toggle } from '@/components/ui'
+import { TrafficMindProjectMatrix } from '@/components/traffic/TrafficMindProjectMatrix'
 import styles from '@/components/settings/Settings.module.css'
 import { buildTemplate, templateToJson, validateAndParse, isValidationError } from '@/lib/apiKeysTemplate'
 import type { ParsedImport } from '@/lib/apiKeysTemplate'
@@ -1651,7 +1652,8 @@ export default function SettingsPage() {
                 </h3>
                 <p style={{ margin: '4px 0 0', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm, 13px)' }}>
                   Master switch for the TrafficMind capture proxy. Enabling starts the proxy + ingest containers;
-                  disabling stops them. Per-project routing is set on each project (TrafficMind section).
+                  disabling stops them. Turn capture on/off per project in the matrix below, or from the toggle on
+                  the TrafficMind page.
                 </p>
               </div>
               <Toggle
@@ -1704,6 +1706,8 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
+
+            {settings.captureProxyEnabled && <TrafficMindProjectMatrix />}
           </div>
         </>
       )}

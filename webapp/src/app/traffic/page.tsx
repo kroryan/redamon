@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Network, PanelRightOpen, Copy } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
 import { Drawer, useToast, useAlertModal, WikiInfoButton } from '@/components/ui'
+import { TrafficCaptureToggle } from '@/components/traffic/TrafficCaptureToggle'
 import {
   useTrafficList,
   useTrafficFacets,
@@ -57,7 +58,7 @@ function toCurl(d: TrafficDetail): string {
 }
 
 export default function TrafficPage() {
-  const { projectId, isLoading: projectLoading } = useProject()
+  const { projectId, currentProject, isLoading: projectLoading } = useProject()
   const router = useRouter()
   const toast = useToast()
 
@@ -172,6 +173,9 @@ export default function TrafficPage() {
         <span className={styles.subtitle}>Captured HTTP transactions</span>
         <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/TrafficMind" title="Open TrafficMind wiki page" />
         <div className={styles.spacer} />
+        {projectId && (
+          <TrafficCaptureToggle projectId={projectId} projectName={currentProject?.name} />
+        )}
         <span className={styles.count}>{total.toLocaleString()} transactions</span>
         <a className={styles.pageBtn} href={exportUrl('csv')}>Export CSV</a>
         <a className={styles.pageBtn} href={exportUrl('json')}>Export JSON</a>
