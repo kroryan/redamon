@@ -12,7 +12,7 @@ import { TradecraftResourceForm } from '@/components/settings/TradecraftResource
 import { TradecraftResourceList } from '@/components/settings/TradecraftResourceList'
 import { PROVIDER_TYPES } from '@/lib/llmProviderPresets'
 import { Modal } from '@/components/ui/Modal/Modal'
-import { useAlertModal, useToast, WikiInfoButton } from '@/components/ui'
+import { useAlertModal, useToast, WikiInfoButton, Toggle } from '@/components/ui'
 import styles from '@/components/settings/Settings.module.css'
 import { buildTemplate, templateToJson, validateAndParse, isValidationError } from '@/lib/apiKeysTemplate'
 import type { ParsedImport } from '@/lib/apiKeysTemplate'
@@ -47,6 +47,14 @@ interface UserSettings {
   ngrokAuthtoken: string
   chiselServerUrl: string
   chiselAuth: string
+  captureProxyEnabled: boolean
+  captureProxyPort: number
+  captureProxyScope: string
+  captureProxyStoreBodies: boolean
+  captureProxyMaxBodyKb: number
+  captureProxyRetentionDays: number
+  captureProxyRedactSecrets: boolean
+  captureProxyPassiveDetect: boolean
 }
 
 const EMPTY_SETTINGS: UserSettings = {
@@ -79,6 +87,14 @@ const EMPTY_SETTINGS: UserSettings = {
   ngrokAuthtoken: '',
   chiselServerUrl: '',
   chiselAuth: '',
+  captureProxyEnabled: false,
+  captureProxyPort: 8888,
+  captureProxyScope: 'both',
+  captureProxyStoreBodies: true,
+  captureProxyMaxBodyKb: 64,
+  captureProxyRetentionDays: 14,
+  captureProxyRedactSecrets: true,
+  captureProxyPassiveDetect: true,
 }
 
 interface RotationInfo {
@@ -542,6 +558,14 @@ export default function SettingsPage() {
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
+          captureProxyEnabled: !!data.captureProxyEnabled,
+          captureProxyPort: data.captureProxyPort ?? 8888,
+          captureProxyScope: data.captureProxyScope || 'both',
+          captureProxyStoreBodies: data.captureProxyStoreBodies ?? true,
+          captureProxyMaxBodyKb: data.captureProxyMaxBodyKb ?? 64,
+          captureProxyRetentionDays: data.captureProxyRetentionDays ?? 14,
+          captureProxyRedactSecrets: data.captureProxyRedactSecrets ?? true,
+          captureProxyPassiveDetect: data.captureProxyPassiveDetect ?? true,
         })
         if (data.rotationConfigs) {
           setRotationConfigs(data.rotationConfigs)
@@ -635,6 +659,14 @@ export default function SettingsPage() {
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
+          captureProxyEnabled: !!data.captureProxyEnabled,
+          captureProxyPort: data.captureProxyPort ?? 8888,
+          captureProxyScope: data.captureProxyScope || 'both',
+          captureProxyStoreBodies: data.captureProxyStoreBodies ?? true,
+          captureProxyMaxBodyKb: data.captureProxyMaxBodyKb ?? 64,
+          captureProxyRetentionDays: data.captureProxyRetentionDays ?? 14,
+          captureProxyRedactSecrets: data.captureProxyRedactSecrets ?? true,
+          captureProxyPassiveDetect: data.captureProxyPassiveDetect ?? true,
         })
         if (data.rotationConfigs) {
           setRotationConfigs(data.rotationConfigs)
@@ -1604,7 +1636,74 @@ export default function SettingsPage() {
       {/* Tab: System */}
       {activeTab === 'mcp' && userId && <McpServersTab userId={userId} />}
 
-      {activeTab === 'system' && <SystemSection />}
+      {activeTab === 'system' && (
+        <>
+          <div style={{
+            background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
+            borderRadius: 'var(--radius-md, 8px)', padding: '20px', marginBottom: '20px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 'var(--text-lg, 16px)' }}>HTTP Traffic Capture</h3>
+                <p style={{ margin: '4px 0 0', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm, 13px)' }}>
+                  Master switch for the capture proxy. Enabling starts the proxy + ingest containers;
+                  disabling stops them. Per-project routing is set on each project (Traffic Capture section).
+                </p>
+              </div>
+              <Toggle
+                checked={settings.captureProxyEnabled}
+                onChange={(v) => { updateSetting('captureProxyEnabled', v); setSettingsDirty(true) }}
+                aria-label="Enable HTTP traffic capture"
+              />
+            </div>
+
+            {settings.captureProxyEnabled && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginTop: 18 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, color: 'var(--text-secondary)', fontSize: 13 }}>
+                  Listen port
+                  <input type="number" className="textInput" value={settings.captureProxyPort}
+                    onChange={(e) => { updateSetting('captureProxyPort', parseInt(e.target.value) || 8888); setSettingsDirty(true) }} />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, color: 'var(--text-secondary)', fontSize: 13 }}>
+                  Scope
+                  <select className="select" value={settings.captureProxyScope}
+                    onChange={(e) => { updateSetting('captureProxyScope', e.target.value); setSettingsDirty(true) }}>
+                    <option value="both">Recon + Agent</option>
+                    <option value="recon">Recon only</option>
+                    <option value="agent">Agent only</option>
+                  </select>
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, color: 'var(--text-secondary)', fontSize: 13 }}>
+                  Inline body cap (KB)
+                  <input type="number" className="textInput" value={settings.captureProxyMaxBodyKb}
+                    onChange={(e) => { updateSetting('captureProxyMaxBodyKb', parseInt(e.target.value) || 64); setSettingsDirty(true) }} />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, color: 'var(--text-secondary)', fontSize: 13 }}>
+                  Retention (days)
+                  <input type="number" className="textInput" value={settings.captureProxyRetentionDays}
+                    onChange={(e) => { updateSetting('captureProxyRetentionDays', parseInt(e.target.value) || 14); setSettingsDirty(true) }} />
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, color: 'var(--text-secondary)', fontSize: 13 }}>
+                  <span>Store bodies</span>
+                  <Toggle checked={settings.captureProxyStoreBodies}
+                    onChange={(v) => { updateSetting('captureProxyStoreBodies', v); setSettingsDirty(true) }} aria-label="Store bodies" />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, color: 'var(--text-secondary)', fontSize: 13 }}>
+                  <span>Redact secrets</span>
+                  <Toggle checked={settings.captureProxyRedactSecrets}
+                    onChange={(v) => { updateSetting('captureProxyRedactSecrets', v); setSettingsDirty(true) }} aria-label="Redact secrets" />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, color: 'var(--text-secondary)', fontSize: 13 }}>
+                  <span>Passive detections</span>
+                  <Toggle checked={settings.captureProxyPassiveDetect}
+                    onChange={(v) => { updateSetting('captureProxyPassiveDetect', v); setSettingsDirty(true) }} aria-label="Passive detections" />
+                </div>
+              </div>
+            )}
+          </div>
+          <SystemSection />
+        </>
+      )}
 
       {/* Skill upload modal */}
       <Modal

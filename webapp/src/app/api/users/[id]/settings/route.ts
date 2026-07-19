@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { isInternalRequest, isScannerRequest, requireUserAccess } from '@/lib/session'
+import { orchestratorFetch } from '@/lib/orchestrator'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -82,6 +83,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         ngrokAuthtoken: '',
         chiselServerUrl: '',
         chiselAuth: '',
+        captureProxyEnabled: false,
+        captureProxyPort: 8888,
+        captureProxyScope: 'both',
+        captureProxyStoreBodies: true,
+        captureProxyMaxBodyKb: 64,
+        captureProxyRetentionDays: 14,
+        captureProxyRedactSecrets: true,
+        captureProxyPassiveDetect: true,
         rotationConfigs,
       })
     }
@@ -168,11 +177,66 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       ? Boolean(body.tunnelsEnabled)
       : (existing?.tunnelsEnabled ?? false)
 
+    // HTTP Traffic Capture (Phase 1) global config. Booleans/ints, so — like
+    // tunnelsEnabled — they cannot ride the string `data` loop above.
+    const captureBoolFields = ['captureProxyStoreBodies', 'captureProxyRedactSecrets', 'captureProxyPassiveDetect'] as const
+    const captureIntFields = ['captureProxyPort', 'captureProxyMaxBodyKb', 'captureProxyRetentionDays'] as const
+    const captureData: Record<string, boolean | number | string> = {}
+    for (const f of captureBoolFields) if (f in body) captureData[f] = Boolean(body[f])
+    for (const f of captureIntFields) if (f in body) {
+      const n = parseInt(String(body[f]), 10)
+      if (Number.isFinite(n)) captureData[f] = n
+    }
+    if ('captureProxyScope' in body && ['recon', 'agent', 'both'].includes(body.captureProxyScope)) {
+      captureData.captureProxyScope = body.captureProxyScope
+    }
+    const captureEnabledProvided = 'captureProxyEnabled' in body
+    const captureDesiredEnabled = captureEnabledProvided
+      ? Boolean(body.captureProxyEnabled)
+      : (existing?.captureProxyEnabled ?? false)
+
     const settings = await prisma.userSettings.upsert({
       where: { userId: id },
-      update: { ...data, ...(enabledProvided ? { tunnelsEnabled: desiredEnabled } : {}) },
-      create: { userId: id, ...data, tunnelsEnabled: desiredEnabled },
+      update: {
+        ...data, ...captureData,
+        ...(enabledProvided ? { tunnelsEnabled: desiredEnabled } : {}),
+        ...(captureEnabledProvided ? { captureProxyEnabled: captureDesiredEnabled } : {}),
+      },
+      create: {
+        userId: id, ...data, ...captureData,
+        tunnelsEnabled: desiredEnabled,
+        captureProxyEnabled: captureDesiredEnabled,
+      },
     })
+
+    // Reconcile the capture proxy container with the desired state (plan §8.4):
+    // flipping the master toggle, or changing a runtime knob while enabled, drives
+    // the orchestrator capture-proxy/{start,stop}. Best-effort: a save must not
+    // fail because the orchestrator is briefly unreachable.
+    const captureEnabledChanged = captureEnabledProvided && captureDesiredEnabled !== (existing?.captureProxyEnabled ?? false)
+    const captureConfigChanged = Object.keys(captureData).length > 0
+    if (captureEnabledChanged || (settings.captureProxyEnabled && captureConfigChanged)) {
+      const orchUrl = process.env.RECON_ORCHESTRATOR_URL || 'http://recon-orchestrator:8010'
+      try {
+        if (settings.captureProxyEnabled) {
+          await orchestratorFetch(`${orchUrl}/capture-proxy/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              port: settings.captureProxyPort,
+              maxBodyKb: settings.captureProxyMaxBodyKb,
+              storeBodies: settings.captureProxyStoreBodies,
+              redactSecrets: settings.captureProxyRedactSecrets,
+              scope: settings.captureProxyScope,
+            }),
+          })
+        } else {
+          await orchestratorFetch(`${orchUrl}/capture-proxy/stop`, { method: 'POST' })
+        }
+      } catch (e) {
+        console.warn('Failed to reconcile capture proxy with orchestrator:', e)
+      }
+    }
 
     // Push tunnel config to kali-sandbox when the enabled state OR a tunnel
     // credential changed. STRIDE I19: tunnels activate ONLY when the operator has

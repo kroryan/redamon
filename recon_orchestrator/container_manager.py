@@ -959,10 +959,27 @@ class ContainerManager:
         except APIError as e:
             logger.warning(f"[capture] could not remove stale container {name}: {e}")
 
-    async def start_capture_proxy(self) -> dict:
-        """Start (idempotently reconcile) the capture proxy + ingest pair."""
-        image = self._capture_image()
-        port = self._capture_port()
+    @staticmethod
+    def _bool_env(value, default: str) -> str:
+        if value is None:
+            return default
+        return "true" if bool(value) else "false"
+
+    async def start_capture_proxy(self, config: dict | None = None) -> dict:
+        """Start (idempotently reconcile) the capture proxy + ingest pair.
+
+        `config` (from the Global Settings toggle) may override runtime knobs:
+        port, maxBodyKb, storeBodies, redactSecrets, scope, blockedIps. The image
+        is NOT overridable from the UI (it comes from the trusted orchestrator env)
+        so the operator toggle can never spawn an arbitrary container image.
+        """
+        config = config or {}
+        image = self._capture_image()  # trusted env only, never from `config`
+        port = int(config.get("port") or self._capture_port())
+        max_body_kb = str(config.get("maxBodyKb") or os.environ.get("CAPTURE_PROXY_MAX_BODY_KB", "64"))
+        store_bodies = self._bool_env(config.get("storeBodies"), os.environ.get("CAPTURE_PROXY_STORE_BODIES", "true"))
+        redact = self._bool_env(config.get("redactSecrets"), os.environ.get("CAPTURE_PROXY_REDACT_SECRETS", "true"))
+        blocked_ips = config.get("blockedIps") or os.environ.get("CAPTURE_BLOCKED_IPS", "")
 
         # Idempotent: clear any stale instances first.
         self._remove_container_if_exists(self.CAPTURE_PROXY_NAME)
@@ -987,9 +1004,9 @@ class ContainerManager:
             environment={
                 "CAPTURE_SPOOL_DIR": "/spool",
                 "CAPTURE_BODIES_DIR": "/bodies",
-                "CAPTURE_PROXY_MAX_BODY_KB": os.environ.get("CAPTURE_PROXY_MAX_BODY_KB", "64"),
-                "CAPTURE_PROXY_STORE_BODIES": os.environ.get("CAPTURE_PROXY_STORE_BODIES", "true"),
-                "CAPTURE_BLOCKED_IPS": os.environ.get("CAPTURE_BLOCKED_IPS", ""),
+                "CAPTURE_PROXY_MAX_BODY_KB": max_body_kb,
+                "CAPTURE_PROXY_STORE_BODIES": store_bodies,
+                "CAPTURE_BLOCKED_IPS": blocked_ips,
             },
             volumes={**spool_vols, "redamon_capture_ca": {"bind": "/ca", "mode": "rw"}},
             cap_drop=["ALL"],
@@ -1011,7 +1028,7 @@ class ContainerManager:
             environment={
                 "CAPTURE_SPOOL_DIR": "/spool",
                 "CAPTURE_BODIES_DIR": "/bodies",
-                "CAPTURE_PROXY_REDACT_SECRETS": os.environ.get("CAPTURE_PROXY_REDACT_SECRETS", "true"),
+                "CAPTURE_PROXY_REDACT_SECRETS": redact,
                 "CAPTURE_REDACT_SALT": os.environ.get("CAPTURE_REDACT_SALT", "redamon-capture"),
                 "TRAFFIC_INGEST_DATABASE_URL": os.environ.get("TRAFFIC_INGEST_DATABASE_URL", ""),
                 # Tag-verification keys: source=recon -> scanner, source=agent -> internal.

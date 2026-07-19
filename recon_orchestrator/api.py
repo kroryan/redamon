@@ -31,6 +31,7 @@ def _value_error_http(e: ValueError) -> "HTTPException":
 from local_llm_manager import LocalLlmManager
 from models import (
     HealthResponse,
+    CaptureProxyConfig,
     ReconStartRequest,
     ReconState,
     ReconStatus,
@@ -397,11 +398,13 @@ async def codefix_sandbox_stop(job_id: str):
 # protected like every other route; loopback-bound on orchestrator-net.
 # ---------------------------------------------------------------------------
 @app.post("/capture-proxy/start")
-async def capture_proxy_start():
+async def capture_proxy_start(config: Optional[CaptureProxyConfig] = None):
     if not container_manager:
         raise HTTPException(status_code=503, detail="Service not initialized")
     try:
-        return await container_manager.start_capture_proxy()
+        return await container_manager.start_capture_proxy(
+            config.model_dump(exclude_none=True) if config else None
+        )
     except Exception as e:
         logger.error(f"Error starting capture proxy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
