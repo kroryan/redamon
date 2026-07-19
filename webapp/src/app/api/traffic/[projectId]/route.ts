@@ -104,7 +104,7 @@ export function buildTrafficWhere(
   if (sp.get('reflected') === 'true') where.reflectedParams = true
   if (sp.get('only5xx') === 'true') where.statusCode = { gte: 500, lt: 600 }
 
-  // Free-text over URL (host/path). Body FTS is Phase 3.
+  // Free-text over URL (host/path) — uses the pg_trgm indexes when FTS is on.
   const q = sp.get('q')
   if (q) {
     where.OR = [
@@ -112,6 +112,13 @@ export function buildTrafficWhere(
       { path: { contains: q, mode: 'insensitive' } },
     ]
   }
+
+  // Body substring search (Phase 3). `resp_body ILIKE '%bodyq%'` — always correct;
+  // becomes index-backed (fast) when the pg_trgm GIN index on resp_body exists
+  // (built by the FTS migration when CAPTURE_PROXY_FTS is on). Covers secrets,
+  // stack traces, code identifiers, and reflected input alike.
+  const bodyq = sp.get('bodyq')
+  if (bodyq) where.respBody = { contains: bodyq, mode: 'insensitive' }
 
   return where
 }

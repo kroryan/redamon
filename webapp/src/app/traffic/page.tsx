@@ -128,6 +128,7 @@ export default function TrafficPage() {
     if (filters.method) n++
     if (filters.statusClass) n++
     if (filters.q) n++
+    if (filters.bodyq) n++
     if (filters.runId) n++
     if (filters.sessionId) n++
     if (filters.hasSetCookie) n++
@@ -240,6 +241,12 @@ export default function TrafficPage() {
           <label>Search URL</label>
           <input className={styles.input} type="text" placeholder="host / path"
             value={filters.q} onChange={e => patch({ q: e.target.value })} />
+        </div>
+        <div className={styles.field}>
+          <label>Search bodies</label>
+          <input className={styles.input} type="text" placeholder="stack trace, AKIA…"
+            value={filters.bodyq} onChange={e => patch({ bodyq: e.target.value })}
+            title="Full-text search over response bodies (Google-style: quotes, -exclude)" />
         </div>
 
         <div className={styles.toggles}>

@@ -82,6 +82,11 @@ describe('buildTrafficWhere', () => {
     expect(w.reflectedParams).toBe(true)
   })
 
+  test('bodyq sets the ILIKE fallback over resp_body (Phase 3)', () => {
+    expect(where('bodyq=stack+trace').respBody).toEqual({ contains: 'stack trace', mode: 'insensitive' })
+    expect(where('').respBody).toBeUndefined()
+  })
+
   test('valid date range sets gte/lte', () => {
     const w = where('from=2026-07-01&to=2026-07-19')
     const s = w.startedAt as { gte?: Date; lte?: Date }

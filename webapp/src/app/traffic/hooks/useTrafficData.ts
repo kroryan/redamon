@@ -63,6 +63,7 @@ export interface TrafficFilters {
   method: string
   statusClass: string
   q: string
+  bodyq: string
   hasSetCookie: boolean
   reflected: boolean
   only5xx: boolean
@@ -83,6 +84,7 @@ export const DEFAULT_FILTERS: TrafficFilters = {
   method: '',
   statusClass: '',
   q: '',
+  bodyq: '',
   hasSetCookie: false,
   reflected: false,
   only5xx: false,
@@ -106,6 +108,7 @@ export function trafficFilterPayload(f: TrafficFilters): Record<string, string> 
   if (f.method) out.method = f.method
   if (f.statusClass) out.statusClass = f.statusClass
   if (f.q) out.q = f.q
+  if (f.bodyq) out.bodyq = f.bodyq
   if (f.hasSetCookie) out.hasSetCookie = 'true'
   if (f.reflected) out.reflected = 'true'
   if (f.only5xx) out.only5xx = 'true'
@@ -150,6 +153,7 @@ function buildQuery(f: TrafficFilters): string {
   if (f.method) p.set('method', f.method)
   if (f.statusClass) p.set('statusClass', f.statusClass)
   if (f.q) p.set('q', f.q)
+  if (f.bodyq) p.set('bodyq', f.bodyq)
   if (f.hasSetCookie) p.set('hasSetCookie', 'true')
   if (f.reflected) p.set('reflected', 'true')
   if (f.only5xx) p.set('only5xx', 'true')
