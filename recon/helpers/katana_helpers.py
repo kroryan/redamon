@@ -91,7 +91,16 @@ def run_katana_crawler(
         if custom_headers:
             for header in custom_headers:
                 cmd.extend(["-H", header])
-        
+
+        # HTTP traffic capture (Phase 1): route this crawl through the capture
+        # proxy when enabled + reachable. The X-Redamon-Ctx tag is added ONLY in
+        # this same branch as the -proxy flag (§20.2), so it can never leak to the
+        # target on the direct path.
+        from helpers.proxy_routing import get_capture_routing
+        _cap_url, _cap_token = get_capture_routing("katana")
+        if _cap_url and _cap_token:
+            cmd.extend(["-proxy", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_token}"])
+
         try:
             # Emit a heartbeat every 30s while Katana crawls so the drawer
             # doesn't go silent on slow targets (deep crawls can run for

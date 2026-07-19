@@ -37,6 +37,15 @@ from recon.project_settings import get_settings
 # downstream consumer (full pipeline + every partial recon module) gets them.
 _settings = get_settings()
 
+# HTTP traffic capture (Phase 1): configure capture-proxy routing once, up front,
+# so every recon HTTP tool that supports it routes through the proxy when the
+# per-project gate is on and the proxy is reachable (else runs direct, §20.1).
+try:
+    from helpers.proxy_routing import configure as _configure_capture_routing
+    _configure_capture_routing(_settings)
+except Exception as _cap_cfg_err:  # noqa: BLE001 — never block a scan on this
+    print(f"[!][capture] routing not configured: {_cap_cfg_err}")
+
 # Extract commonly used settings as module-level variables for compatibility
 TARGET_DOMAIN = _settings['TARGET_DOMAIN']
 SUBDOMAIN_LIST = _settings['SUBDOMAIN_LIST']
