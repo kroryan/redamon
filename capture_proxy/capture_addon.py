@@ -73,6 +73,13 @@ class RedamonCapture:
         self.tmp_dir = os.path.join(self.spool_dir, ".tmp")
         os.makedirs(self.tmp_dir, exist_ok=True)
         os.makedirs(self.bodies_dir, exist_ok=True)
+        # The bodies store is shared with the webapp (different uid) which reads
+        # + ref-counted-GCs blobs, so make it group/other writable. Internal
+        # volume only; blobs are never served by raw path (§15.7).
+        try:
+            os.chmod(self.bodies_dir, 0o777)
+        except OSError:
+            pass
 
         self._q: "queue.Queue[dict]" = queue.Queue(maxsize=int(os.environ.get("CAPTURE_QUEUE_MAX", "2000")))
         self.dropped = 0
@@ -92,6 +99,7 @@ class RedamonCapture:
         )
         if not allowed:
             # Refuse: do not forward. Record the attempt for the scope audit.
+            print(f"[capture] BLOCKED {flow.request.pretty_host} ({reason})", flush=True)
             flow.metadata["redamon_blocked"] = reason
             flow.response = http.Response.make(
                 403, b"blocked by redamon capture proxy egress guard\n",

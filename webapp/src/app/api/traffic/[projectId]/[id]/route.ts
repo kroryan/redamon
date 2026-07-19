@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { requireEffectiveUser, requireProjectAccess, ownerScope } from '@/lib/access'
+import { readCapturedBody } from '@/lib/captureBodies'
 
 // GET /api/traffic/[projectId]/[id] — full transaction including headers + bodies.
 // Tenant-enforced: guardProject + the row must belong to this project AND the
@@ -27,6 +28,15 @@ export async function GET(
     })
     if (!row) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+
+    // Resolve offloaded bodies from the content-addressed store. Served only via
+    // this owned row, never by raw sha path (§15.7). Inline bodies pass through.
+    if (!row.reqBody && row.reqBodyRef) {
+      row.reqBody = await readCapturedBody(row.reqBodyRef)
+    }
+    if (!row.respBody && row.respBodyRef) {
+      row.respBody = await readCapturedBody(row.respBodyRef)
     }
 
     return NextResponse.json(row)

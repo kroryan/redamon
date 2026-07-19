@@ -1,6 +1,6 @@
 'use client'
 
-import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 
 export interface TrafficRow {
   id: string
@@ -86,6 +86,52 @@ export const DEFAULT_FILTERS: TrafficFilters = {
   hasSetCookie: false,
   reflected: false,
   only5xx: false,
+}
+
+export function trafficFiltersToQuery(f: TrafficFilters): string {
+  return buildQuery(f)
+}
+
+// The filter fields the DELETE-all-matching + export routes understand (excludes
+// pagination/sort). Mirrors the server-side buildTrafficWhere inputs.
+export function trafficFilterPayload(f: TrafficFilters): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (f.from) out.from = f.from
+  if (f.to) out.to = f.to
+  if (f.source && f.source !== 'both') out.source = f.source
+  if (f.tool.length) out.tool = f.tool.join(',')
+  if (f.sessionId) out.sessionId = f.sessionId
+  if (f.runId) out.runId = f.runId
+  if (f.host) out.host = f.host
+  if (f.method) out.method = f.method
+  if (f.statusClass) out.statusClass = f.statusClass
+  if (f.q) out.q = f.q
+  if (f.hasSetCookie) out.hasSetCookie = 'true'
+  if (f.reflected) out.reflected = 'true'
+  if (f.only5xx) out.only5xx = 'true'
+  return out
+}
+
+async function deleteTraffic(projectId: string, body: { ids: string[] } | { filter: Record<string, string> }): Promise<{ deleted: number }> {
+  const res = await fetch(`/api/traffic/${projectId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error('Delete failed')
+  return res.json()
+}
+
+export function useDeleteTraffic(projectId: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { ids: string[] } | { filter: Record<string, string> }) =>
+      deleteTraffic(projectId as string, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['traffic', 'list', projectId] })
+      qc.invalidateQueries({ queryKey: ['traffic', 'facets', projectId] })
+    },
+  })
 }
 
 function buildQuery(f: TrafficFilters): string {

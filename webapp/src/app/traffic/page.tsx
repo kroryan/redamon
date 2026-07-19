@@ -4,11 +4,14 @@ import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Network } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
-import { Drawer, useToast } from '@/components/ui'
+import { Drawer, useToast, useAlertModal } from '@/components/ui'
 import {
   useTrafficList,
   useTrafficFacets,
   useTrafficDetail,
+  useDeleteTraffic,
+  trafficFiltersToQuery,
+  trafficFilterPayload,
   DEFAULT_FILTERS,
   type TrafficFilters,
   type TrafficRow,
@@ -56,10 +59,45 @@ export default function TrafficPage() {
 
   const [filters, setFilters] = useState<TrafficFilters>(DEFAULT_FILTERS)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const list = useTrafficList(projectId, filters)
   const facets = useTrafficFacets(projectId)
   const detail = useTrafficDetail(projectId, selectedId)
+  const del = useDeleteTraffic(projectId)
+  const { dangerConfirm } = useAlertModal()
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }, [])
+
+  const exportUrl = useCallback((format: 'csv' | 'json') =>
+    `/api/traffic/${projectId}/export?format=${format}&${trafficFiltersToQuery(filters)}`, [projectId, filters])
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (selected.size === 0) return
+    const ok = await dangerConfirm(`Delete ${selected.size} selected transaction(s)? This cannot be undone.`, 'Delete traffic')
+    if (!ok) return
+    try {
+      const r = await del.mutateAsync({ ids: [...selected] })
+      setSelected(new Set())
+      toast.success(`Deleted ${r.deleted} transaction(s)`)
+    } catch { toast.error('Delete failed') }
+  }, [selected, dangerConfirm, del, toast])
+
+  const handleDeleteAllMatching = useCallback(async () => {
+    const ok = await dangerConfirm('Delete ALL transactions matching the current filters? This cannot be undone.', 'Delete all matching')
+    if (!ok) return
+    try {
+      const r = await del.mutateAsync({ filter: trafficFilterPayload(filters) })
+      setSelected(new Set())
+      toast.success(`Deleted ${r.deleted} transaction(s)`)
+    } catch { toast.error('Delete failed') }
+  }, [filters, dangerConfirm, del, toast])
 
   // Any filter change resets to the first page.
   const patch = useCallback((p: Partial<TrafficFilters>) => {
@@ -124,6 +162,14 @@ export default function TrafficPage() {
         <span className={styles.subtitle}>Captured HTTP transactions</span>
         <div className={styles.spacer} />
         <span className={styles.count}>{total.toLocaleString()} transactions</span>
+        <a className={styles.pageBtn} href={exportUrl('csv')}>Export CSV</a>
+        <a className={styles.pageBtn} href={exportUrl('json')}>Export JSON</a>
+        {selected.size > 0 && (
+          <button className={styles.clearBtn} onClick={handleDeleteSelected}>Delete selected ({selected.size})</button>
+        )}
+        {total > 0 && (
+          <button className={styles.clearBtn} onClick={handleDeleteAllMatching}>Delete all matching</button>
+        )}
       </div>
 
       {/* Filters */}
@@ -219,6 +265,16 @@ export default function TrafficPage() {
         <table className={styles.table}>
           <thead>
             <tr>
+              <th>
+                <input type="checkbox"
+                  checked={rows.length > 0 && rows.every(r => selected.has(r.id))}
+                  onChange={e => setSelected(prev => {
+                    const next = new Set(prev)
+                    if (e.target.checked) rows.forEach(r => next.add(r.id))
+                    else rows.forEach(r => next.delete(r.id))
+                    return next
+                  })} />
+              </th>
               <th className={styles.sortable} onClick={() => toggleSort('startedAt')}>Time{filters.sort === 'startedAt' ? (filters.dir === 'desc' ? ' ↓' : ' ↑') : ''}</th>
               <th className={styles.sortable} onClick={() => toggleSort('source')}>Source</th>
               <th className={styles.sortable} onClick={() => toggleSort('tool')}>Tool</th>
@@ -234,6 +290,9 @@ export default function TrafficPage() {
           <tbody>
             {rows.map((r: TrafficRow) => (
               <tr key={r.id} className={styles.row} onClick={() => setSelectedId(r.id)}>
+                <td onClick={e => e.stopPropagation()}>
+                  <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSelect(r.id)} />
+                </td>
                 <td>{fmtTime(r.startedAt)}</td>
                 <td>
                   <span className={`${styles.badge} ${r.source === 'recon' ? styles.badgeRecon : styles.badgeAgent}`}>

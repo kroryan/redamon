@@ -185,6 +185,13 @@ def run() -> None:  # pragma: no cover - integration path
     spool_dir = os.environ.get("CAPTURE_SPOOL_DIR", "/spool")
     reject_dir = os.path.join(spool_dir, ".rejected")
     os.makedirs(reject_dir, exist_ok=True)
+    # Bodies store is shared with the webapp (different uid) for read + GC.
+    bodies_dir = os.environ.get("CAPTURE_BODIES_DIR", "/bodies")
+    try:
+        os.makedirs(bodies_dir, exist_ok=True)
+        os.chmod(bodies_dir, 0o777)
+    except OSError:
+        pass
     keys = _keys()
     redact = _redact_enabled()
     dsn = os.environ["TRAFFIC_INGEST_DATABASE_URL"]

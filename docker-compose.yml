@@ -853,6 +853,9 @@ services:
       - js_recon_uploads:/data/js-recon-uploads
       - js_recon_custom:/data/js-recon-custom
       - ./VERSION:/app/VERSION:ro
+      # HTTP traffic capture (Phase 1): read offloaded bodies for the /traffic
+      # detail view + ref-counted body GC on delete/retention. rw for the GC.
+      - capture_bodies:/capture-bodies
     depends_on:
       postgres:
         condition: service_healthy

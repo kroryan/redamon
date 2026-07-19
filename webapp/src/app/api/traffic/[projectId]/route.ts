@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
-import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
+import { requireEffectiveUser, requireProjectAccess, ownerScope } from '@/lib/access'
+import { gcOrphanBodies } from '@/lib/captureBodies'
 import type { Prisma } from '@prisma/client'
 
 // Summary columns only — bodies are fetched on demand via the [id] detail route,
@@ -154,5 +155,58 @@ export async function GET(
   } catch (error) {
     console.error('Failed to list captured traffic:', error)
     return NextResponse.json({ error: 'Failed to list traffic' }, { status: 500 })
+  }
+}
+
+// DELETE /api/traffic/[projectId] — batch delete (plan §12.2).
+// Body: { ids: [...] } OR { filter: {<same query params as GET>} } (delete-all-matching).
+// Tenant-enforced (projectId + ownerScope; cross-user -> 404 via requireProjectAccess),
+// body-GC-aware (ref-counted blob cleanup), and audited. Client tenant fields are
+// never trusted — projectId/userId come from the route + session.
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> },
+) {
+  try {
+    const { projectId } = await params
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, projectId)
+    if (access instanceof NextResponse) return access
+
+    const body = await request.json().catch(() => ({}))
+    const where: Prisma.CapturedHttpTransactionWhereInput = { projectId, ...ownerScope(eff) }
+
+    let mode: string
+    if (Array.isArray(body?.ids) && body.ids.length > 0) {
+      where.id = { in: body.ids.filter((x: unknown) => typeof x === 'string') }
+      mode = `ids(${body.ids.length})`
+    } else if (body?.filter && typeof body.filter === 'object') {
+      // Reuse the exact list filter predicate so "delete all matching" deletes
+      // precisely what the current view shows.
+      const sp = new URLSearchParams()
+      for (const [k, v] of Object.entries(body.filter)) {
+        if (v !== undefined && v !== null && v !== '') sp.set(k, String(v))
+      }
+      Object.assign(where, buildTrafficWhere(projectId, eff.userId, sp))
+      mode = 'filter'
+    } else {
+      return NextResponse.json({ error: 'Provide { ids: [...] } or { filter: {...} }' }, { status: 400 })
+    }
+
+    // Collect the body refs of the doomed rows so we can GC their blobs after.
+    const doomed = await prisma.capturedHttpTransaction.findMany({
+      where, select: { reqBodyRef: true, respBodyRef: true },
+    })
+    const shas = doomed.flatMap(r => [r.reqBodyRef, r.respBodyRef])
+
+    const res = await prisma.capturedHttpTransaction.deleteMany({ where })
+    const gc = await gcOrphanBodies(shas)
+
+    console.log(`[traffic-delete] user=${eff.userId} project=${projectId} mode=${mode} deleted=${res.count} blobsGC=${gc.deleted}`)
+    return NextResponse.json({ deleted: res.count, blobsDeleted: gc.deleted })
+  } catch (error) {
+    console.error('Failed to delete captured traffic:', error)
+    return NextResponse.json({ error: 'Failed to delete traffic' }, { status: 500 })
   }
 }

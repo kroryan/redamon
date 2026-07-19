@@ -22,6 +22,8 @@ const INTERNAL_ALLOWLIST: { method: string; pattern: RegExp }[] = [
   { method: 'GET', pattern: /^\/api\/global\/tunnel-config$/ },
   // Captured HTTP traffic ingest (recon via scanner key, agent via internal key).
   { method: 'POST', pattern: /^\/api\/traffic\/[^/]+\/ingest$/ },
+  // Periodic traffic housekeeping (retention/quota/orphan GC), internal cron only.
+  { method: 'POST', pattern: /^\/api\/traffic\/maintenance$/ },
 ]
 
 // Fail-open rollout: default log-only (never blocks), so an omitted route shows
