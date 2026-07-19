@@ -23,7 +23,7 @@ export function GlobalHeader() {
       : []),
     { label: 'CypherFix', href: '/cypherfix', icon: <Shield size={14} /> },
     { label: 'Insights', href: '/insights', icon: <TrendingUp size={14} /> },
-    { label: 'TrafficMind', href: '/traffic', icon: <Network size={14} /> },
+    { label: 'TrafficMind', href: '/traffic', icon: <Network size={14} />, isNew: true },
     { label: 'Reports', href: '/reports', icon: <FileText size={14} /> },
   ]
 
@@ -50,6 +50,7 @@ export function GlobalHeader() {
               >
                 {item.icon}
                 <span>{item.label}</span>
+                {'isNew' in item && item.isNew && <span className={styles.newBadge}>New!</span>}
               </Link>
             )
           })}

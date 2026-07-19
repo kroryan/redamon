@@ -144,6 +144,17 @@ These scripts and binaries are downloaded into `/opt/tools/{linux,windows}/` and
 
 ---
 
+## HTTP Traffic Capture (TrafficMind)
+
+These libraries power **TrafficMind**, RedAmon's engagement-scoped HTTP capture layer (the credential-free man-in-the-middle capture proxy and its trusted ingest worker). Both are installed into the `redamon-capture-proxy` image (`capture_proxy/Dockerfile`).
+
+| Library | Purpose | License | Source Repository | How Used |
+|---------|---------|---------|-------------------|----------|
+| **mitmproxy** | Interactive TLS-capable HTTP/HTTPS intercepting proxy | MIT | https://github.com/mitmproxy/mitmproxy | Installed via `pip` (`mitmproxy~=11.1`) in `capture_proxy/Dockerfile`; run as `mitmdump -s capture_addon.py` on the target-facing network to intercept and record HTTP transactions |
+| **psycopg (psycopg[binary])** | PostgreSQL adapter for Python | LGPL-3.0 | https://github.com/psycopg/psycopg | Installed via `pip` (`psycopg[binary]~=3.2`) in `capture_proxy/Dockerfile`; used only by the trusted ingest worker (`capture_proxy/ingest_worker.py`) to INSERT captured transactions via a scoped, insert-only database role |
+
+---
+
 ## Vulnerability Assessment (GVM/OpenVAS)
 
 | Tool | Purpose | License | Source Repository | How Used |
@@ -408,4 +419,4 @@ AGPL-3.0 extends the GPL-3.0 copyleft to users who interact with the software **
 
 ---
 
-*Last updated: June 2026*
+*Last updated: July 2026*

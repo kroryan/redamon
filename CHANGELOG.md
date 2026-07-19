@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.0] - 2026-07-19
+
+### Added
+
+- **TrafficMind: engagement-scoped HTTP traffic capture.** A built-in, credential-free man-in-the-middle proxy sits between every offensive tool and its target, records the full request/response of each HTTP transaction, tags it with who produced it (project / user / run / tool via a signed `X-Redamon-Ctx` HMAC context tag), and stores it in Postgres through a trusted, INSERT-only ingest worker. It is Burp-style HTTP history that turns on with a toggle, attributes every request to its source, and is queryable by both the operator and the AI agent. Off by default, two-level gate (global master switch + per-project routing), SSRF egress guard with DNS-rebinding IP pin, secret redaction, passive signal detection (reflected params, missing security headers, cookie-flag issues), content-addressed body offload, CSV/JSON export, and ref-counted body GC. A new **TrafficMind** view in the top navigation exposes the corpus as a paginated, filterable table with a request/response detail drawer. Full architecture in [readmes/README.TRAFFIC.md](readmes/README.TRAFFIC.md); operator guide in the [TrafficMind wiki page](https://github.com/samugit83/redamon/wiki/TrafficMind).
+- **Ten `proxy_*` agent tools over the captured corpus.** Eight read-only analysis tools (`proxy_search`, `proxy_get`, `proxy_sitemap`, `proxy_params`, `proxy_grep`, `proxy_diff`, `proxy_to_curl`, `proxy_query`) turn the traffic history into an interactive attack loop, and two active tools (`proxy_replay`, `proxy_fuzz`) resend or Intruder-style fuzz a captured request. All ten are strictly tenant-scoped (tenant from ContextVars, never tool args; every WHERE hard-injects `project_id` + `user_id`), `proxy_query` is a constrained allowlisted query builder with no raw-SQL surface. The two active tools are host-pinned to their origin (no scope/SSRF pivot), re-captured with `isReplay` / `originId` lineage, danger-flagged, phase-gated (exploitation / post-exploitation only), and stealth-restricted (`proxy_fuzz` forbidden in stealth).
+- **Eight agent HTTP tools routed through the capture proxy** (`execute_curl`, `execute_httpx`, `execute_playwright`, `execute_nuclei`, `execute_katana`, `execute_ffuf`, `execute_arjun`, `execute_wpscan`), mirroring the recon pipeline so the agent's own crawl/fuzz/scan traffic is captured, searchable, and replayable. Routing fails open: if the proxy is enabled but unreachable, tools run direct with no tag and no scan failure.
+
+---
+
 ## [6.0.3] - 2026-07-19
 
 ### Added

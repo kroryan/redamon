@@ -140,9 +140,13 @@ def _capture_playwright_args(ctx_token: str):
         cap_url, cap_tok = (None, None)
     if not (cap_url and cap_tok):
         return ("", "")
+    # ignore_https_errors is REQUIRED when routing: the capture proxy MITMs TLS with
+    # its own CA, which the browser does not trust, so without this every https
+    # navigation fails with ERR_CERT_AUTHORITY_INVALID and nothing is captured.
+    # Only emitted when capture is on, so non-capture playwright keeps strict TLS.
     return (
         f'proxy={{"server": {cap_url!r}}},',
-        f'extra_http_headers={{"X-Redamon-Ctx": {cap_tok!r}}},',
+        f'extra_http_headers={{"X-Redamon-Ctx": {cap_tok!r}}}, ignore_https_errors=True,',
     )
 
 
@@ -173,6 +177,7 @@ def _capture_launch_patch(ctx_token: str) -> str:
         def _pw_cap_new_context(self, **kw):
             _h = dict(kw.get("extra_http_headers") or {{}}); _h.update(_pw_cap_hdr)
             kw["extra_http_headers"] = _h
+            kw["ignore_https_errors"] = True  # trust the capture proxy's MITM CA
             return _pw_cap_C(self, **kw)
         _pw_cap.Browser.new_context = _pw_cap_new_context
         _pw_cap_P = _pw_cap.BrowserType.launch_persistent_context
@@ -180,6 +185,7 @@ def _capture_launch_patch(ctx_token: str) -> str:
             kw["proxy"] = {{"server": _pw_cap_url}}
             _h = dict(kw.get("extra_http_headers") or {{}}); _h.update(_pw_cap_hdr)
             kw["extra_http_headers"] = _h
+            kw["ignore_https_errors"] = True  # trust the capture proxy's MITM CA
             return _pw_cap_P(self, *a, **kw)
         _pw_cap.BrowserType.launch_persistent_context = _pw_cap_persistent
     """)
