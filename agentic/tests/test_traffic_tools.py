@@ -120,5 +120,57 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(tt._shell_quote("'; rm -rf / #"), "''\\''; rm -rf / #'")
 
 
+ORIGIN = {
+    "method": "GET", "scheme": "https", "host": "target.test", "port": 443,
+    "path": "/api/item", "query": "?id=42",
+    "req_headers": {"Cookie": "sid=alice", "Authorization": "Bearer AAA", "User-Agent": "x"},
+    "req_body": None,
+}
+
+
+class TestReplayBuilder(unittest.TestCase):
+    def test_host_is_pinned_to_origin(self):
+        # A mutate that tries to change the host / Host header must NOT retarget.
+        args = tt.build_replay_curl(ORIGIN, {"headers": {"Host": "evil.test"}, "path": "/x"})
+        self.assertIn("https://target.test/x", args)
+        self.assertNotIn("evil.test", args)
+
+    def test_param_mutation(self):
+        args = tt.build_replay_curl(ORIGIN, {"param": {"id": "99"}})
+        self.assertIn("id=99", args)
+        self.assertNotIn("id=42", args)
+
+    def test_auth_context_swap_drops_headers(self):
+        args = tt.build_replay_curl(ORIGIN, {"dropHeaders": ["Cookie", "Authorization"]})
+        self.assertNotIn("sid=alice", args)
+        self.assertNotIn("Bearer AAA", args)
+
+    def test_cookie_replace(self):
+        args = tt.build_replay_curl(ORIGIN, {"cookie": "sid=bob"})
+        self.assertIn("sid=bob", args)
+        self.assertNotIn("sid=alice", args)
+
+    def test_method_override(self):
+        self.assertIn("-X DELETE", tt.build_replay_curl(ORIGIN, {"method": "delete"}))
+
+    def test_args_are_shell_safe(self):
+        # An injection attempt in a mutated value must be shlex-quoted, not raw.
+        args = tt.build_replay_curl(ORIGIN, {"param": {"id": "1; rm -rf /"}})
+        self.assertNotIn("; rm -rf /", args.replace("'1; rm -rf /'", ""))
+
+
+class TestFuzzBuilder(unittest.TestCase):
+    def test_iterates_payloads_over_param(self):
+        variants = list(tt.build_fuzz_curls(ORIGIN, "id", ["1", "2", "' OR 1=1"]))
+        self.assertEqual(len(variants), 3)
+        self.assertIn("id=2", variants[1][1])
+        # each is still host-pinned
+        self.assertTrue(all("target.test" in v[1] for v in variants))
+
+    def test_payload_cap(self):
+        variants = list(tt.build_fuzz_curls(ORIGIN, "id", [str(i) for i in range(200)]))
+        self.assertEqual(len(variants), tt._FUZZ_MAX_PAYLOADS)
+
+
 if __name__ == "__main__":
     unittest.main()

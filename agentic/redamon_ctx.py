@@ -34,10 +34,12 @@ import json
 from typing import Any, Dict, Mapping, Optional
 
 # Only these keys are carried; anything else is dropped so a caller cannot smuggle
-# extra fields past the signature into the ingest stamping logic.
+# extra fields past the signature into the ingest stamping logic. `is_replay` /
+# `origin_id` let a signed replay (proxy_replay/proxy_fuzz) mark its lineage — the
+# ingest stamps them from the VERIFIED tag, so a target/proxy cannot forge them.
 _ALLOWED_FIELDS = (
     "source", "project_id", "user_id", "run_id", "session_id",
-    "tool", "phase", "step", "member_id",
+    "tool", "phase", "step", "member_id", "is_replay", "origin_id",
 )
 
 VALID_SOURCES = frozenset({"recon", "agent"})

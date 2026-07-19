@@ -47,6 +47,13 @@ stop and inform the user honestly — do NOT proceed with noisy techniques.
 ### execute_jsluice -- NO RESTRICTIONS
 - Passive local file analysis only. No network traffic. Use freely.
 
+### proxy_fuzz — FORBIDDEN
+- Iterating a payload set is inherently noisy; do NOT use proxy_fuzz in stealth mode.
+
+### proxy_replay — RESTRICTED
+- A SINGLE targeted replay only (one request); no rapid-fire replays or manual fuzzing loops.
+- Read/analyze tools (proxy_search/get/sitemap/params/grep/diff/to_curl/query) are passive — use freely.
+
 ### execute_curl — RESTRICTED
 - Single targeted requests ONLY (one URL per invocation)
 - MUST include a realistic User-Agent header (`-H 'User-Agent: Mozilla/5.0 ...'`)

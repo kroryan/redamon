@@ -24,6 +24,8 @@ DANGEROUS_TOOLS = frozenset({
     'execute_code', 'execute_hydra', 'execute_playwright', 'execute_wpscan',
     'execute_arjun', 'execute_ffuf', 'execute_amass', 'execute_gau',
     'execute_katana',
+    # Active captured-traffic tools emit live target traffic (§10.4/§15.5).
+    'proxy_replay', 'proxy_fuzz',
 })
 
 # =============================================================================
@@ -201,6 +203,9 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
         'proxy_diff': ['informational', 'exploitation', 'post_exploitation'],
         'proxy_to_curl': ['informational', 'exploitation', 'post_exploitation'],
         'proxy_query': ['informational', 'exploitation', 'post_exploitation'],
+        # Active traffic tools (dangerous — emit live traffic): exploitation+ only.
+        'proxy_replay': ['exploitation', 'post_exploitation'],
+        'proxy_fuzz': ['exploitation', 'post_exploitation'],
         'execute_curl': ['informational', 'exploitation', 'post_exploitation'],
         'execute_naabu': ['informational', 'exploitation'],
         'execute_httpx': ['informational', 'exploitation'],

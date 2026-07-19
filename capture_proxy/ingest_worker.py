@@ -109,6 +109,9 @@ def build_row(payload: Dict[str, Any], rec: Dict[str, Any], redact: bool) -> Dic
         "tool": payload.get("tool"),
         "phase": payload.get("phase"),
         "step_id": payload.get("step"),
+        # Replay lineage — from the VERIFIED tag (a target/proxy can't forge it).
+        "is_replay": bool(payload.get("is_replay")),
+        "origin_id": payload.get("origin_id"),
 
         "method": (rec.get("method") or "GET").upper(),
         "scheme": scheme,

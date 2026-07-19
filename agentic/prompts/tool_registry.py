@@ -77,6 +77,28 @@ TOOL_REGISTRY = {
             '   - Your project + user scope is always enforced automatically'
         ),
     },
+    "proxy_replay": {
+        "purpose": "Resend a captured request with fields changed (DANGEROUS)",
+        "when_to_use": "IDOR/BOLA/priv-esc/auth-bypass: replay with a mutated param or a swapped auth context",
+        "args_format": '"id": "<origin transaction id>", "mutate": "JSON e.g. {\\"param\\":{\\"id\\":\\"99\\"}} or {\\"dropHeaders\\":[\\"Cookie\\"]}"',
+        "description": (
+            '**proxy_replay** (DANGEROUS — emits live traffic)\n'
+            '   - Resend a captured request with fields changed, through the capture proxy\n'
+            '   - mutate: method, path, query, param{k:v}, headers{k:v}, dropHeaders[], cookie, body\n'
+            '   - AUTH-CONTEXT SWAP: dropHeaders:["Cookie","Authorization"] or a new cookie -> IDOR/BOLA/privesc\n'
+            '   - ALWAYS sent to the ORIGIN host (cannot target a different host); recorded with isReplay'
+        ),
+    },
+    "proxy_fuzz": {
+        "purpose": "Burp-Intruder over one captured request (DANGEROUS)",
+        "when_to_use": "Iterate a payload set over one parameter and diff the responses",
+        "args_format": '"id": "<origin id>", "insertion_point": "<query param name>", "payloads": "JSON array of strings"',
+        "description": (
+            '**proxy_fuzz** (DANGEROUS — emits live traffic, noisy)\n'
+            '   - Replay one captured request iterating payloads over a query param; per-payload status/size summary\n'
+            '   - Payload count is capped; sent to the ORIGIN host only; FORBIDDEN in stealth mode'
+        ),
+    },
     "query_graph": {
         "purpose": "Neo4j database queries",
         "when_to_use": "PRIMARY - Check graph first for recon data",

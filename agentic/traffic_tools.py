@@ -458,6 +458,117 @@ def _build_order(order) -> str:
     return " ORDER BY " + ", ".join(parts)
 
 
+# --------------------------------------------------------------------------
+# Active tools (proxy_replay / proxy_fuzz) — DANGEROUS: they emit live traffic.
+# The @tool stubs below exist only for the LLM's schema + phase/danger gating;
+# the real work is orchestrated by the executor (_run_active_proxy in tools.py),
+# which reads the origin (tenant-scoped), builds the request PINNED to the
+# origin's host (no Host-swap scope bypass, §15.5), signs a replay tag, and sends
+# it through the worker's execute_curl -> capture proxy.
+# --------------------------------------------------------------------------
+import shlex  # noqa: E402
+from urllib.parse import parse_qsl, urlencode  # noqa: E402
+
+_FUZZ_MAX_PAYLOADS = 50
+
+
+async def fetch_transaction(txn_id: str) -> Optional[Dict[str, Any]]:
+    """Tenant-scoped fetch of one captured transaction (for replay/fuzz origin)."""
+    u, p = _tenant()
+    if not u or not p:
+        return None
+    rows = await _query(
+        f"SELECT * FROM {_TABLE} WHERE id = %(id)s AND project_id = %(p)s AND user_id = %(u)s",
+        {"id": txn_id, "p": p, "u": u})
+    return rows[0] if rows else None
+
+
+def _apply_header_mutations(headers: Dict[str, Any], mutate: Dict[str, Any]) -> Dict[str, str]:
+    # Work case-insensitively; the target host is NEVER mutable (scope safety).
+    out = {str(k): (v if isinstance(v, str) else json.dumps(v)) for k, v in (headers or {}).items()}
+    drop = {str(h).lower() for h in mutate.get("dropHeaders", [])}
+    if "cookie" in mutate and not mutate["cookie"]:
+        drop.add("cookie")
+    out = {k: v for k, v in out.items() if k.lower() not in drop and k.lower() != "host"}
+    for k, v in (mutate.get("headers") or {}).items():
+        # replace any existing same-name header (case-insensitive)
+        out = {kk: vv for kk, vv in out.items() if kk.lower() != str(k).lower()}
+        if str(k).lower() != "host":
+            out[str(k)] = str(v)
+    if mutate.get("cookie"):
+        out = {kk: vv for kk, vv in out.items() if kk.lower() != "cookie"}
+        out["Cookie"] = str(mutate["cookie"])
+    return out
+
+
+def _origin_url(txn: Dict[str, Any], path: str, query: str) -> str:
+    scheme = txn.get("scheme", "http")
+    host = txn.get("host")           # PINNED — never taken from mutate
+    port = txn.get("port")
+    hostport = f"{host}:{port}" if port not in (80, 443, None) else host
+    q = ("?" + query.lstrip("?")) if query else ""
+    return f"{scheme}://{hostport}{path}{q}"
+
+
+def build_replay_curl(txn: Dict[str, Any], mutate: Dict[str, Any]) -> str:
+    """Build a curl arg string for a replay. Host/scheme/port are pinned to the
+    origin; method/path/query/params/headers/cookie/body are mutable."""
+    method = str(mutate.get("method") or txn.get("method") or "GET").upper()
+    path = str(mutate.get("path", txn.get("path") or "/"))
+    q = str(mutate.get("query", txn.get("query") or "") or "").lstrip("?")
+    if mutate.get("param"):
+        pairs = dict(parse_qsl(q))
+        pairs.update({str(k): str(v) for k, v in mutate["param"].items()})
+        q = urlencode(pairs)
+    url = _origin_url(txn, path, q)
+    headers = _apply_header_mutations(txn.get("req_headers") or {}, mutate)
+    body = mutate.get("body", txn.get("req_body"))
+    parts = ["-s", "-i", "-X", method]
+    for k, v in headers.items():
+        parts += ["-H", f"{k}: {v}"]
+    if body:
+        parts += ["--data-raw", str(body)]
+    parts.append(url)
+    return " ".join(shlex.quote(x) for x in parts)
+
+
+def build_fuzz_curls(txn: Dict[str, Any], insertion_point: str, payloads: List[str]):
+    """Yield (payload, curl_args) for each payload substituted into the query
+    param `insertion_point`. Capped at _FUZZ_MAX_PAYLOADS."""
+    capped = list(payloads)[:_FUZZ_MAX_PAYLOADS]
+    for pl in capped:
+        args = build_replay_curl(txn, {"param": {insertion_point: pl}})
+        yield str(pl), args
+    return
+
+
+@tool
+async def proxy_replay(id: str, mutate: str = "") -> str:
+    """DANGEROUS — resend a captured request with fields changed, through the
+    capture proxy. `mutate` is optional JSON: {method, path, query, param:{k:v},
+    headers:{k:v}, dropHeaders:[..], cookie, body}. Supports AUTH-CONTEXT SWAP
+    (dropHeaders:["Cookie","Authorization"] or a new cookie) for IDOR/BOLA/priv-esc.
+    The request is ALWAYS sent to the ORIGIN transaction's host (it cannot be
+    pointed at a different host). Recorded as a new transaction (isReplay)."""
+    return "proxy_replay is dispatched by the executor"  # intercepted; never called directly
+
+
+@tool
+async def proxy_fuzz(id: str, insertion_point: str, payloads: str) -> str:
+    """DANGEROUS — Burp-Intruder: replay one captured request iterating a payload
+    set over `insertion_point` (a query-param name). `payloads` is a JSON array of
+    strings (capped). Returns a per-payload status/length summary to spot anomalies.
+    Sent to the ORIGIN host only. Forbidden in stealth mode (noisy)."""
+    return "proxy_fuzz is dispatched by the executor"  # intercepted; never called directly
+
+
+ACTIVE_PROXY_TOOL_NAMES = frozenset({"proxy_replay", "proxy_fuzz"})
+
+
+def build_traffic_active_tools() -> Dict[str, Any]:
+    return {"proxy_replay": proxy_replay, "proxy_fuzz": proxy_fuzz}
+
+
 # All read tools, keyed by name (registered into the executor's _all_tools).
 def build_traffic_read_tools() -> Dict[str, Any]:
     return {
