@@ -185,12 +185,10 @@ The judge/grader model and promptfoo's dataset plugins are **downloaded at scan 
 
 ---
 
-## Anonymity & Tunneling
+## Tunneling
 
 | Tool | Purpose | License | Source Repository | How Used |
 |------|---------|---------|-------------------|----------|
-| **Tor** | Anonymous network routing (optional) | BSD-3-Clause | https://gitlab.torproject.org/tpo/core/tor | Installed via `apt-get` in `recon/Dockerfile` |
-| **Proxychains4** | SOCKS proxy chaining | LGPL-2.1+ | https://github.com/rofl0r/proxychains-ng | Installed via `apt-get` in `recon/Dockerfile` |
 | **Ngrok** | TCP tunneling for reverse shells (optional) | Proprietary (free tier) | https://ngrok.com/ | Binary downloaded in `mcp/kali-sandbox/Dockerfile` |
 | **Chisel** | Multi-port TCP tunneling | MIT | https://github.com/jpillora/chisel | Binary downloaded in `mcp/kali-sandbox/Dockerfile` |
 
@@ -284,7 +282,6 @@ These are libraries and frameworks used to build RedAmon's own web application, 
 | **httpx** | Async HTTP client for Python | BSD-3-Clause | https://github.com/encode/httpx | `mcp/requirements.txt`, `agentic/requirements.txt` |
 | **Requests** | HTTP library for Python | Apache-2.0 | https://github.com/psf/requests | Multiple `requirements.txt` files |
 | **dnspython** | DNS toolkit for Python | ISC | https://github.com/rthalley/dnspython | `recon/requirements.txt` |
-| **PySocks** | SOCKS proxy client (Tor / anonymity routing) | BSD-3-Clause | https://github.com/Anorov/PySocks | `recon/requirements.txt` |
 | **python-whois** | WHOIS lookup library | MIT | https://github.com/richardpenman/whois | `recon/requirements.txt` |
 | **xmltodict** | XML to Python dict parser | MIT | https://github.com/martinblech/xmltodict | `gvm_scan/requirements.txt` |
 | **SSE-Starlette** | Server-Sent Events for Starlette/FastAPI | BSD-3-Clause | https://github.com/sysid/sse-starlette | `recon_orchestrator/requirements.txt`, `mcp/requirements.txt` |
@@ -403,7 +400,7 @@ All other RedAmon source code (the webapp, the agent, the recon orchestrator, MC
 
 ### LGPL libraries
 
-Several LGPL-licensed libraries (PyGithub, Paramiko, psycopg, ldap3, Proxychains4) are used via standard Python imports or dynamic linking. The LGPL explicitly permits this without requiring the calling code to adopt LGPL or GPL terms, provided the libraries can be replaced or re-linked by the end user. Since RedAmon installs these via standard `pip` (user-replaceable), this condition is satisfied.
+Several LGPL-licensed libraries (PyGithub, Paramiko, psycopg, ldap3) are used via standard Python imports or dynamic linking. The LGPL explicitly permits this without requiring the calling code to adopt LGPL or GPL terms, provided the libraries can be replaced or re-linked by the end user. Since RedAmon installs these via standard `pip` (user-replaceable), this condition is satisfied.
 
 ### AGPL network-interaction obligation
 
