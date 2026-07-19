@@ -12,6 +12,12 @@ RUN pip install --no-cache-dir "mitmproxy~=11.1" "psycopg[binary]~=3.2"
 # writable paths at runtime (compose mounts them; root fs is read-only).
 RUN useradd -m -u 10001 -s /usr/sbin/nologin capture
 
+# Block privilege escalation by STRIPPING setuid/setgid bits from every binary,
+# rather than the `no-new-privileges` flag — which breaks execve for non-root
+# users on this project's snap-Docker/AppArmor hosts (see container_manager.py
+# "no-new-privileges ... breaks execve"). Same approach the codefix sandbox uses.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
+
 WORKDIR /app
 COPY capture_proxy/redamon_ctx.py \
      capture_proxy/egress.py \
@@ -22,6 +28,11 @@ COPY capture_proxy/redamon_ctx.py \
 # Bundle the hard-guardrail so the proxy can enforce it WITHOUT any secret or
 # network access (static domain blocklist). Kept in sync with the other copies.
 COPY recon_orchestrator/hard_guardrail.py /app/hard_guardrail.py
+
+# Pre-create the mount points owned by the runtime user. Docker copies this
+# ownership onto an EMPTY named volume on first mount, so the non-root process
+# can write the spool / body store / CA dir without a root init step.
+RUN mkdir -p /spool /bodies /ca && chown -R capture:capture /spool /bodies /ca
 
 USER capture
 

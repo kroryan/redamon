@@ -12,21 +12,17 @@
 -- then set the ingest DSN:
 --   TRAFFIC_INGEST_DATABASE_URL=postgresql://traffic_ingest:<secret>@postgres:5432/redamon
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'traffic_ingest') THEN
-    -- Password is injected via psql -v role_password; falls back to a placeholder
-    -- that MUST be changed (the deploy secret-strength gate should enforce this).
-    EXECUTE format('CREATE ROLE traffic_ingest LOGIN PASSWORD %s', :'role_password');
-  END IF;
-END
-$$;
+-- Create the role idempotently. \gexec runs the SELECT's result as SQL; the
+-- password is substituted client-side by psql (-v role_password=...). A DO block
+-- cannot be used here because psql does not substitute :'vars' inside $$-quotes.
+SELECT format('CREATE ROLE traffic_ingest LOGIN PASSWORD %L', :'role_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'traffic_ingest')\gexec
 
--- Exactly one privilege on exactly one table.
+-- Re-applying rotates the password.
+ALTER ROLE traffic_ingest LOGIN PASSWORD :'role_password';
+
+-- Exactly one privilege on exactly one table: INSERT, nothing else.
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM traffic_ingest;
+GRANT USAGE ON SCHEMA public TO traffic_ingest;         -- needed to name the table
 GRANT INSERT ON TABLE captured_http_transactions TO traffic_ingest;
--- The role needs USAGE on the schema to reference the table at all.
-GRANT USAGE ON SCHEMA public TO traffic_ingest;
-
--- Defensive: never let it read anything back.
-REVOKE SELECT ON captured_http_transactions FROM traffic_ingest;
+REVOKE SELECT ON captured_http_transactions FROM traffic_ingest;  -- never read back
