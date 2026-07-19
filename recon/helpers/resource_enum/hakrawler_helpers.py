@@ -55,9 +55,17 @@ def _crawl_single_url(
     if include_subs:
         cmd.append("-subs")
 
-    if custom_headers:
-        header_str = ";;".join(custom_headers)
-        cmd.extend(["-h", header_str])
+    # HTTP traffic capture (Phase 1): route through the capture proxy when
+    # enabled + reachable. The X-Redamon-Ctx tag is added ONLY in this routing
+    # branch (§20.2 no-leak). hakrawler joins headers with ';;' via -h.
+    _cap_headers = list(custom_headers) if custom_headers else []
+    from helpers.proxy_routing import get_capture_routing
+    _cap_url, _cap_token = get_capture_routing("hakrawler")
+    if _cap_url and _cap_token:
+        cmd.extend(["-proxy", _cap_url])
+        _cap_headers.append(f"X-Redamon-Ctx: {_cap_token}")
+    if _cap_headers:
+        cmd.extend(["-h", ";;".join(_cap_headers)])
 
     try:
         process = subprocess.Popen(

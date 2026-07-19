@@ -80,6 +80,13 @@ def _fuzz_single_target(
     for header in custom_headers:
         cmd.extend(["-H", header])
 
+    # HTTP traffic capture (Phase 1): route through the capture proxy when
+    # enabled + reachable; tag added ONLY in this branch (§20.2 no-leak).
+    from helpers.proxy_routing import get_capture_routing
+    _cap_url, _cap_token = get_capture_routing("ffuf")
+    if _cap_url and _cap_token:
+        cmd.extend(["-x", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_token}"])
+
     cmd.extend(["-of", "json", "-o", output_file])
     cmd.extend(["-s"])  # Silent mode (no banner/progress)
 

@@ -81,13 +81,28 @@ def _run_arjun_single_method(
         if disable_redirects:
             cmd.append('--disable-redirects')
 
-        headers_str = '\n'.join(h.strip() for h in custom_headers if h.strip())
+        # HTTP traffic capture (Phase 1): arjun uses python-requests, so route it
+        # via HTTP(S)_PROXY env + carry the tag in --headers. Both are set ONLY in
+        # the routing branch (§20.2 no-leak).
+        _cap_url, _cap_token = (None, None)
+        try:
+            from helpers.proxy_routing import get_capture_routing
+            _cap_url, _cap_token = get_capture_routing("arjun")
+        except Exception:
+            pass
+        _hdrs = [h.strip() for h in custom_headers if h.strip()]
+        if _cap_url and _cap_token:
+            _hdrs.append(f"X-Redamon-Ctx: {_cap_token}")
+        headers_str = '\n'.join(_hdrs)
         if headers_str:
             cmd.extend(['--headers', headers_str])
 
         print(f"[*][Arjun/{method}] Scanning {len(target_urls)} URLs...")
 
         env = os.environ.copy()
+        if _cap_url and _cap_token:
+            env["HTTP_PROXY"] = _cap_url
+            env["HTTPS_PROXY"] = _cap_url
 
         timed_out = False
         proc = subprocess.Popen(

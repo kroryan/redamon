@@ -108,7 +108,7 @@ async def execute_tool_node(
         }
 
     # Set context
-    set_tenant_context(user_id, project_id)
+    set_tenant_context(user_id, project_id, session_id)
     set_phase_context(phase)
     if graph_view_cyphers:
         set_graph_view_context(graph_view_cyphers.get(session_id))

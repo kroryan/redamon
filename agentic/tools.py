@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 from agent_context import (  # noqa: E402
     current_user_id,
     current_project_id,
+    current_session_id,
     current_phase,
     current_graph_view_cypher,
     set_tenant_context,
@@ -53,6 +54,15 @@ from agent_context import (  # noqa: E402
     get_graph_view_context,
     get_phase_context,
 )
+
+
+# Target-facing agent tools whose traffic should route through the capture proxy
+# when enabled (plan §9.1 allowlist). Deliberately excludes OSINT / API-key tools
+# (cve_intel, shodan, execute_gau, web_search, …) so their keys never touch the
+# proxy (§15.4). The kali MCP servers add the proxy flag + X-Redamon-Ctx header.
+_CAPTURE_ROUTED_TOOLS = frozenset({
+    "execute_curl", "execute_httpx", "execute_playwright",
+})
 
 
 # =============================================================================
@@ -1746,6 +1756,37 @@ class PhaseAwareToolExecutor:
         """
         self._cve_intel_api_key = key
 
+    def set_capture_proxy_enabled(self, enabled: bool) -> None:
+        """Per-project HTTP-capture routing gate for the agent's target tools."""
+        self._capture_proxy_enabled = bool(enabled)
+
+    def _build_redamon_ctx(self, tool_name: str) -> str:
+        """Sign an X-Redamon-Ctx tag for the current tool call (plan §10.1/§20.4).
+
+        The agent holds INTERNAL_API_KEY and signs here; the kali MCP server only
+        carries the opaque token (adds the proxy flag + header when routing), so
+        the least-trusted worker holds no signing key. Tenant/session/phase come
+        from ContextVars, never from LLM args. Returns "" if we can't/shouldn't tag.
+        """
+        try:
+            from redamon_ctx import sign_tag
+            key = os.environ.get("INTERNAL_API_KEY", "")
+            if not key:
+                return ""
+            payload = {
+                "source": "agent",
+                "project_id": current_project_id.get(),
+                "user_id": current_user_id.get(),
+                "session_id": current_session_id.get() or None,
+                "tool": tool_name,
+                "phase": current_phase.get(),
+            }
+            if not payload["project_id"] or not payload["user_id"]:
+                return ""
+            return sign_tag(payload, key)
+        except Exception:
+            return ""
+
     def _extract_text_from_output(self, output) -> str:
         """
         Extract clean text from MCP tool output.
@@ -1926,6 +1967,17 @@ class PhaseAwareToolExecutor:
                 "output": None,
                 "error": f"Tool '{tool_name}' not found"
             }
+
+        # HTTP traffic capture (Phase 1): for target-facing tools, inject a signed,
+        # opaque X-Redamon-Ctx tag as a stripped arg the LLM never sees. The kali
+        # MCP tool turns it into the proxy flag + header ONLY when the proxy is
+        # reachable (§20.2 no-leak). Gated on the per-project capture flag; NEVER
+        # added to API-key/OSINT tools (§15.4).
+        if (tool_name in _CAPTURE_ROUTED_TOOLS
+                and getattr(self, "_capture_proxy_enabled", False)):
+            _redamon_ctx = self._build_redamon_ctx(tool_name)
+            if _redamon_ctx:
+                tool_args = {**tool_args, "_redamon_ctx": _redamon_ctx}
 
         # Dispatch logic pulled into a closure so we can re-invoke with a
         # fresh tool reference after an MCP reconnect.

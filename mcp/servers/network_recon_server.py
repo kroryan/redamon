@@ -105,7 +105,7 @@ _hydra_start_time: float = 0
 
 
 @mcp.tool()
-def execute_curl(args: str) -> str:
+def execute_curl(args: str, _redamon_ctx: str = "") -> str:
     """
     Execute curl HTTP client with any valid CLI arguments.
 
@@ -161,6 +161,13 @@ def execute_curl(args: str) -> str:
     """
     try:
         cmd_args = shlex.split(args)
+        # HTTP traffic capture (Phase 1): route through the capture proxy when a
+        # tag is present + the proxy is reachable. -x + -H added together, ONLY in
+        # this branch (§20.2 no-leak); the LLM never sees _redamon_ctx.
+        from capture_routing import agent_capture_routing
+        _cap_url, _cap_tok = agent_capture_routing(_redamon_ctx)
+        if _cap_url and _cap_tok:
+            cmd_args = ["-x", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_tok}"] + cmd_args
         result = subprocess.run(
             ["curl"] + cmd_args,
             capture_output=True,
@@ -237,7 +244,7 @@ def execute_naabu(args: str) -> str:
 
 
 @mcp.tool()
-def execute_httpx(args: str) -> str:
+def execute_httpx(args: str, _redamon_ctx: str = "") -> str:
     """
     Execute httpx HTTP prober with any valid CLI arguments.
 
@@ -275,6 +282,12 @@ def execute_httpx(args: str) -> str:
     """
     try:
         cmd_args = shlex.split(args)
+        # HTTP traffic capture (Phase 1): route through the capture proxy when a
+        # tag is present + reachable; -proxy + -H added together, ONLY here (§20.2).
+        from capture_routing import agent_capture_routing
+        _cap_url, _cap_tok = agent_capture_routing(_redamon_ctx)
+        if _cap_url and _cap_tok:
+            cmd_args = ["-proxy", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_tok}"] + cmd_args
         result = subprocess.run(
             ["httpx"] + cmd_args,
             capture_output=True,

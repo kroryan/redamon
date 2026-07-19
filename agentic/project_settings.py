@@ -51,6 +51,10 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     # Has no effect on non-Anthropic providers (gated by isinstance check).
     'ANTHROPIC_PROMPT_CACHING_ENABLED': True,
 
+    # HTTP Traffic Capture (mitmproxy, Phase 1) — per-project routing gate for
+    # the agent's target-facing tools (same flag recon reads).
+    'CAPTURE_PROXY_ENABLED': False,
+
     # Stealth Mode
     'STEALTH_MODE': False,
 
@@ -410,6 +414,7 @@ def fetch_agent_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['HYDRA_VERBOSE'] = project.get('hydraVerbose', DEFAULT_AGENT_SETTINGS['HYDRA_VERBOSE'])
     settings['HYDRA_MAX_WORDLIST_ATTEMPTS'] = project.get('hydraMaxWordlistAttempts', DEFAULT_AGENT_SETTINGS['HYDRA_MAX_WORDLIST_ATTEMPTS'])
     settings['SHODAN_ENABLED'] = project.get('shodanEnabled', DEFAULT_AGENT_SETTINGS['SHODAN_ENABLED'])
+    settings['CAPTURE_PROXY_ENABLED'] = project.get('captureProxyEnabled', DEFAULT_AGENT_SETTINGS['CAPTURE_PROXY_ENABLED'])
     settings['STEALTH_MODE'] = project.get('stealthMode', DEFAULT_AGENT_SETTINGS['STEALTH_MODE'])
     settings['AGENT_GUARDRAIL_ENABLED'] = project.get('agentGuardrailEnabled', DEFAULT_AGENT_SETTINGS['AGENT_GUARDRAIL_ENABLED'])
     # Fireteam (multi-agent)

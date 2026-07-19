@@ -15,16 +15,19 @@ from typing import Optional
 
 current_user_id: ContextVar[str] = ContextVar("current_user_id", default="")
 current_project_id: ContextVar[str] = ContextVar("current_project_id", default="")
+current_session_id: ContextVar[str] = ContextVar("current_session_id", default="")
 current_phase: ContextVar[str] = ContextVar("current_phase", default="informational")
 current_graph_view_cypher: ContextVar[Optional[str]] = ContextVar(
     "current_graph_view_cypher", default=None,
 )
 
 
-def set_tenant_context(user_id: str, project_id: str) -> None:
-    """Set the current user and project context for tool execution."""
+def set_tenant_context(user_id: str, project_id: str, session_id: str = "") -> None:
+    """Set the current user, project (and optionally session) context for tools."""
     current_user_id.set(user_id)
     current_project_id.set(project_id)
+    if session_id:
+        current_session_id.set(session_id)
 
 
 def set_phase_context(phase: str) -> None:

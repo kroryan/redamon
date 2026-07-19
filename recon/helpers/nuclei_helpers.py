@@ -233,7 +233,14 @@ def build_nuclei_command(
     # Interactsh (OOB testing)
     if not interactsh:
         cmd.append("-no-interactsh")
-    
+
+    # HTTP traffic capture (Phase 1): route through the capture proxy when
+    # enabled + reachable; tag added ONLY in this branch (§20.2 no-leak).
+    from helpers.proxy_routing import get_capture_routing
+    _cap_url, _cap_token = get_capture_routing("nuclei")
+    if _cap_url and _cap_token:
+        cmd.extend(["-proxy", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_token}"])
+
     return cmd
 
 
