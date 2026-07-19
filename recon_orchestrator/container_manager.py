@@ -927,6 +927,143 @@ class ContainerManager:
 
         return state
 
+    # =======================================================================
+    # HTTP traffic capture proxy lifecycle (Phase 1, plan §8.4 / §11)
+    # A single persistent proxy + ingest pair, toggled on/off (NOT per-scan).
+    # The orchestrator reconciles the desired state set by the Global Settings
+    # toggle. The proxy is credential-free on pentest-net; the ingest holds the
+    # scoped INSERT-only DB role on redamon-network. Both spawned via the host
+    # docker daemon (like every other orchestrator-managed container).
+    # =======================================================================
+    CAPTURE_PROXY_NAME = "redamon-capture-proxy"
+    TRAFFIC_INGEST_NAME = "redamon-traffic-ingest"
+    # Compose network names: `redamon` is explicitly named "redamon-network";
+    # `pentest-net` has no explicit name so Compose derives "redamon_pentest-net".
+    _CAPTURE_PROXY_NETWORK = "redamon_pentest-net"
+    _CAPTURE_INGEST_NETWORK = "redamon-network"
+
+    def _capture_image(self) -> str:
+        return os.environ.get("CAPTURE_PROXY_IMAGE", "redamon-capture-proxy:latest")
+
+    def _capture_port(self) -> int:
+        try:
+            return int(os.environ.get("CAPTURE_PROXY_PORT", "8888"))
+        except (TypeError, ValueError):
+            return 8888
+
+    def _remove_container_if_exists(self, name: str) -> None:
+        try:
+            self.client.containers.get(name).remove(force=True)
+        except NotFound:
+            pass
+        except APIError as e:
+            logger.warning(f"[capture] could not remove stale container {name}: {e}")
+
+    async def start_capture_proxy(self) -> dict:
+        """Start (idempotently reconcile) the capture proxy + ingest pair."""
+        image = self._capture_image()
+        port = self._capture_port()
+
+        # Idempotent: clear any stale instances first.
+        self._remove_container_if_exists(self.CAPTURE_PROXY_NAME)
+        self._remove_container_if_exists(self.TRAFFIC_INGEST_NAME)
+
+        spool_vols = {
+            "redamon_capture_spool": {"bind": "/spool", "mode": "rw"},
+            "redamon_capture_bodies": {"bind": "/bodies", "mode": "rw"},
+        }
+
+        # --- Proxy: pentest-net, loopback publish, NO DB creds / signing key ---
+        self.client.containers.run(
+            image,
+            name=self.CAPTURE_PROXY_NAME,
+            detach=True,
+            command=["mitmdump", "--quiet", "--set", "confdir=/ca",
+                     "--set", "stream_large_bodies=5m",
+                     "--listen-port", str(port), "-s", "/app/capture_addon.py"],
+            network=self._CAPTURE_PROXY_NETWORK,
+            # Loopback publish so host-net recon containers reach 127.0.0.1:<port>.
+            ports={f"{port}/tcp": ("127.0.0.1", port)},
+            environment={
+                "CAPTURE_SPOOL_DIR": "/spool",
+                "CAPTURE_BODIES_DIR": "/bodies",
+                "CAPTURE_PROXY_MAX_BODY_KB": os.environ.get("CAPTURE_PROXY_MAX_BODY_KB", "64"),
+                "CAPTURE_PROXY_STORE_BODIES": os.environ.get("CAPTURE_PROXY_STORE_BODIES", "true"),
+                "CAPTURE_BLOCKED_IPS": os.environ.get("CAPTURE_BLOCKED_IPS", ""),
+            },
+            volumes={**spool_vols, "redamon_capture_ca": {"bind": "/ca", "mode": "rw"}},
+            cap_drop=["ALL"],
+            read_only=True,
+            tmpfs={"/tmp": "size=64m,exec"},
+            mem_limit=os.environ.get("CAPTURE_PROXY_MEM", "384m"),
+            pids_limit=256,
+            restart_policy={"Name": "unless-stopped"},
+            labels={"redamon.capture": "proxy"},
+        )
+
+        # --- Ingest: redamon-network, scoped INSERT-only role + verify keys ---
+        self.client.containers.run(
+            image,
+            name=self.TRAFFIC_INGEST_NAME,
+            detach=True,
+            command=["python", "/app/ingest_worker.py"],
+            network=self._CAPTURE_INGEST_NETWORK,
+            environment={
+                "CAPTURE_SPOOL_DIR": "/spool",
+                "CAPTURE_BODIES_DIR": "/bodies",
+                "CAPTURE_PROXY_REDACT_SECRETS": os.environ.get("CAPTURE_PROXY_REDACT_SECRETS", "true"),
+                "CAPTURE_REDACT_SALT": os.environ.get("CAPTURE_REDACT_SALT", "redamon-capture"),
+                "TRAFFIC_INGEST_DATABASE_URL": os.environ.get("TRAFFIC_INGEST_DATABASE_URL", ""),
+                # Tag-verification keys: source=recon -> scanner, source=agent -> internal.
+                "SCANNER_API_KEY": os.environ.get("SCANNER_API_KEY", ""),
+                "INTERNAL_API_KEY": os.environ.get("INTERNAL_API_KEY", ""),
+            },
+            volumes=spool_vols,
+            cap_drop=["ALL"],
+            read_only=True,
+            tmpfs={"/tmp": "size=64m,exec"},
+            mem_limit=os.environ.get("TRAFFIC_INGEST_MEM", "256m"),
+            pids_limit=256,
+            restart_policy={"Name": "unless-stopped"},
+            labels={"redamon.capture": "ingest"},
+        )
+
+        logger.info(f"[capture] started proxy + ingest (port {port})")
+        return await self.capture_proxy_status()
+
+    async def stop_capture_proxy(self) -> dict:
+        """Stop + remove the capture proxy and ingest (toggle off)."""
+        for name in (self.CAPTURE_PROXY_NAME, self.TRAFFIC_INGEST_NAME):
+            try:
+                c = self.client.containers.get(name)
+                c.stop(timeout=10)
+                c.remove()
+            except NotFound:
+                pass
+            except Exception as e:
+                logger.warning(f"[capture] failed to stop {name}: {e}")
+        logger.info("[capture] stopped proxy + ingest")
+        return await self.capture_proxy_status()
+
+    async def capture_proxy_status(self) -> dict:
+        """Report the running state of the proxy + ingest."""
+        def _state(name: str) -> str:
+            try:
+                return self.client.containers.get(name).status
+            except NotFound:
+                return "absent"
+            except APIError:
+                return "unknown"
+
+        proxy = _state(self.CAPTURE_PROXY_NAME)
+        ingest = _state(self.TRAFFIC_INGEST_NAME)
+        return {
+            "proxy": proxy,
+            "ingest": ingest,
+            "running": proxy == "running" and ingest == "running",
+            "port": self._capture_port(),
+        }
+
     def _parse_log_line(self, line: str, current_phase: Optional[str], current_phase_num: Optional[int], timestamp: Optional[datetime] = None) -> ReconLogEvent:
         """Parse a log line and detect phase changes"""
         if timestamp is None:

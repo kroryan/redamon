@@ -418,6 +418,17 @@ services:
       # spawned recon/scan containers, so a compromised recon container (which does
       # hold INTERNAL_API_KEY) still cannot drive the orchestration API.
       ORCHESTRATOR_API_KEY: ${ORCHESTRATOR_API_KEY:-changeme}
+      # HTTP traffic capture (Phase 1): the orchestrator spawns/stops the proxy +
+      # ingest pair on the toggle. It passes the scoped INSERT-only DSN to the
+      # ingest (role created once via capture_proxy/sql/001). The proxy stays
+      # credential-free; the orchestrator never puts DB creds on it.
+      TRAFFIC_INGEST_DATABASE_URL: ${TRAFFIC_INGEST_DATABASE_URL:-}
+      CAPTURE_PROXY_IMAGE: ${CAPTURE_PROXY_IMAGE:-redamon-capture-proxy:latest}
+      CAPTURE_PROXY_PORT: ${CAPTURE_PROXY_PORT:-8888}
+      CAPTURE_PROXY_MAX_BODY_KB: ${CAPTURE_PROXY_MAX_BODY_KB:-64}
+      CAPTURE_PROXY_STORE_BODIES: ${CAPTURE_PROXY_STORE_BODIES:-true}
+      CAPTURE_PROXY_REDACT_SECRETS: ${CAPTURE_PROXY_REDACT_SECRETS:-true}
+      CAPTURE_BLOCKED_IPS: ${CAPTURE_BLOCKED_IPS:-}
       # The orchestrator's OWN trusted webapp URL for credentialed pre-flight
       # calls (RoE / hard-guardrail). Reachable by DNS now that V1 put the
       # orchestrator on a shared net with the webapp. NOT the client-supplied

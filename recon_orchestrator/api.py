@@ -391,6 +391,40 @@ async def codefix_sandbox_stop(job_id: str):
     return {"job_id": job_id, "stopped": True}
 
 
+# ---------------------------------------------------------------------------
+# HTTP traffic capture proxy lifecycle (Phase 1, plan §8.4). Toggled on/off by
+# the webapp when the Global Settings capture flag flips. X-Orchestrator-Key
+# protected like every other route; loopback-bound on orchestrator-net.
+# ---------------------------------------------------------------------------
+@app.post("/capture-proxy/start")
+async def capture_proxy_start():
+    if not container_manager:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    try:
+        return await container_manager.start_capture_proxy()
+    except Exception as e:
+        logger.error(f"Error starting capture proxy: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/capture-proxy/stop")
+async def capture_proxy_stop():
+    if not container_manager:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    try:
+        return await container_manager.stop_capture_proxy()
+    except Exception as e:
+        logger.error(f"Error stopping capture proxy: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/capture-proxy/status")
+async def capture_proxy_status():
+    if not container_manager:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    return await container_manager.capture_proxy_status()
+
+
 @app.get("/defaults")
 async def get_defaults():
     """
