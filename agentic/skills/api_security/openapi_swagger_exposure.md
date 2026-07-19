@@ -19,6 +19,10 @@ Reference for finding API specs leaked in production and converting them into a 
 | Parameter discovery on each route | `execute_arjun` | Find params not in the spec. |
 | Scan with the spec as input | `execute_nuclei -im openapi -l <spec>` | Nuclei consumes OpenAPI / Swagger directly. |
 
+### Captured-traffic workflow (proxy_* tools)
+
+When HTTP Traffic Capture is enabled, proxy_grep over captured response bodies can catch a spec leaked inline (`{"openapi":` or `{"swagger":`) that a fixed path sweep misses, and proxy_get reads it. proxy_sitemap (endpoints actually observed in traffic) diffed against the spec's declared paths is a direct spec-drift and hidden-operation detector, and proxy_params compares declared parameters against the ones the handler actually accepts. proxy_replay probes operations marked `security: []` for real unauth access. Where the proxy stops: the core workflow stays fetch-and-parse plus execute_ffuf / execute_arjun / execute_nuclei against the parsed spec.
+
 ## Discovery paths
 
 The OpenAPI 3.0 / Swagger 2.0 spec lives at `/openapi.json` or `/swagger.json` by convention, but apps publish under many aliases:

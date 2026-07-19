@@ -863,7 +863,7 @@ def execute_masscan(args: str) -> str:
 
 
 @mcp.tool()
-def execute_wpscan(args: str) -> str:
+def execute_wpscan(args: str, _redamon_ctx: str = "") -> str:
     """
     Execute WPScan WordPress vulnerability scanner with any valid CLI arguments.
 
@@ -892,6 +892,21 @@ def execute_wpscan(args: str) -> str:
     """
     try:
         cmd_args = shlex.split(args)
+        # HTTP traffic capture (Phase 1): route through the capture proxy when a
+        # tag is present + reachable. wpscan uses --proxy and a single --headers
+        # value, so merge the tag into any existing --headers (else append one).
+        # Added ONLY in this branch (§20.2 no-leak).
+        from capture_routing import agent_capture_routing
+        _cap_url, _cap_tok = agent_capture_routing(_redamon_ctx)
+        if _cap_url and _cap_tok:
+            cmd_args = cmd_args + ["--proxy", _cap_url]
+            _tag = f"X-Redamon-Ctx: {_cap_tok}"
+            for _i, _a in enumerate(cmd_args):
+                if _a == "--headers" and _i + 1 < len(cmd_args):
+                    cmd_args[_i + 1] = (cmd_args[_i + 1] + "\n" + _tag) if cmd_args[_i + 1] else _tag
+                    break
+            else:
+                cmd_args = cmd_args + ["--headers", _tag]
         result = subprocess.run(
             ["wpscan"] + cmd_args,
             capture_output=True,
@@ -981,7 +996,7 @@ def execute_amass(args: str) -> str:
 
 
 @mcp.tool()
-def execute_katana(args: str) -> str:
+def execute_katana(args: str, _redamon_ctx: str = "") -> str:
     """
     Execute Katana web crawler for endpoint and URL discovery.
 
@@ -1018,6 +1033,14 @@ def execute_katana(args: str) -> str:
         if '-silent' not in cmd_args:
             cmd_args.append('-silent')
 
+        # HTTP traffic capture (Phase 1): route through the capture proxy when a
+        # tag is present + reachable; -proxy + -H added together, ONLY here (§20.2
+        # no-leak). katana -H is repeatable so appending never drops user headers.
+        from capture_routing import agent_capture_routing
+        _cap_url, _cap_tok = agent_capture_routing(_redamon_ctx)
+        if _cap_url and _cap_tok:
+            cmd_args = cmd_args + ["-proxy", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_tok}"]
+
         result = subprocess.run(
             ["katana"] + cmd_args,
             capture_output=True,
@@ -1044,7 +1067,7 @@ def execute_katana(args: str) -> str:
 
 
 @mcp.tool()
-def execute_arjun(args: str) -> str:
+def execute_arjun(args: str, _redamon_ctx: str = "") -> str:
     """
     Execute Arjun HTTP parameter discovery tool with any valid CLI arguments.
 
@@ -1084,11 +1107,28 @@ def execute_arjun(args: str) -> str:
     """
     try:
         cmd_args = shlex.split(args)
+        # HTTP traffic capture (Phase 1): arjun is python-requests based, so route
+        # via HTTP(S)_PROXY env + carry the tag in --headers (merged into any
+        # existing --headers value). Both set ONLY in this branch (§20.2 no-leak).
+        from capture_routing import agent_capture_routing
+        _cap_url, _cap_tok = agent_capture_routing(_redamon_ctx)
+        _env = os.environ.copy()
+        if _cap_url and _cap_tok:
+            _tag = f"X-Redamon-Ctx: {_cap_tok}"
+            for _i, _a in enumerate(cmd_args):
+                if _a == "--headers" and _i + 1 < len(cmd_args):
+                    cmd_args[_i + 1] = (cmd_args[_i + 1] + "\n" + _tag) if cmd_args[_i + 1] else _tag
+                    break
+            else:
+                cmd_args = cmd_args + ["--headers", _tag]
+            _env["HTTP_PROXY"] = _cap_url
+            _env["HTTPS_PROXY"] = _cap_url
         result = subprocess.run(
             ["arjun"] + cmd_args,
             capture_output=True,
             text=True,
-            timeout=1200
+            timeout=1200,
+            env=_env,
         )
         # arjun has post-processing (reads -oJ JSON output file), so we can't
         # use _format_subprocess_result directly. Do the returncode-aware
@@ -1134,7 +1174,7 @@ def execute_arjun(args: str) -> str:
 
 
 @mcp.tool()
-def execute_ffuf(args: str) -> str:
+def execute_ffuf(args: str, _redamon_ctx: str = "") -> str:
     """
     Execute FFuf web fuzzer with any valid CLI arguments.
 
@@ -1182,6 +1222,14 @@ def execute_ffuf(args: str) -> str:
         # Auto-inject -noninteractive to prevent interactive console mode
         if '-noninteractive' not in cmd_args:
             cmd_args.append('-noninteractive')
+
+        # HTTP traffic capture (Phase 1): route through the capture proxy when a
+        # tag is present + reachable; -x + -H added together, ONLY here (§20.2
+        # no-leak). ffuf -H is repeatable so appending never drops user headers.
+        from capture_routing import agent_capture_routing
+        _cap_url, _cap_tok = agent_capture_routing(_redamon_ctx)
+        if _cap_url and _cap_tok:
+            cmd_args = cmd_args + ["-x", _cap_url, "-H", f"X-Redamon-Ctx: {_cap_tok}"]
 
         result = subprocess.run(
             ["ffuf"] + cmd_args,

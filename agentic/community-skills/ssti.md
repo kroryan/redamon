@@ -37,6 +37,10 @@ Every step uses tools already available to the agent. The only new install is `t
 - `execute_playwright` to confirm reflection context (HTML attribute, JS string, CDATA) on JS-heavy SPAs.
 - `kali_shell` for `sstimap`, `tplmap`, `interactsh-client` (OAST), `chisel`, `ngrok`, and any one-off `jq` post-processing.
 
+### Captured-traffic workflow (proxy_* tools)
+
+When HTTP Traffic Capture is enabled, proxy_fuzz sprays the arithmetic and polyglot probes (`{{7*7}}`, `${7*7}`, the `${{<%[%'"}}%\` polyglot) over one captured query param and reports per-payload status/length; proxy_grep then scans response bodies for a tell-tale `49` or an engine parse-error (`jinja2.exceptions.TemplateSyntaxError`, `freemarker.core.ParseException`, `Twig\Error\SyntaxError`). Once the engine is fingerprinted, proxy_replay fires an engine-specific gadget from a captured request. Where the proxy stops: sandbox-escape to RCE still runs through sstimap/tplmap plus OOB confirmation and shell staging; proxy_fuzz iterates only a query param, so body/header injection points need iterated proxy_replay.
+
 ## Workflow
 
 The workflow follows three phases. Phase 1 is non-destructive: graph review, candidate enumeration, and a polyglot probe that fires across every common engine to fingerprint the renderer. Phase 2 weaponizes the fingerprint with engine-specific sandbox escapes. Phase 3 stabilises code execution and demonstrates impact. If the engagement forbids out-of-band callbacks (no interactsh, no DNS exfil), prefer the inline-output and timing oracles called out in each phase rather than the OAST variants.

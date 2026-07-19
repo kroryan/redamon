@@ -105,6 +105,10 @@ execute_nuclei args: "-l /tmp/targets.txt -as -s critical,high -H 'Authorization
 execute_nuclei args: "-l /tmp/openapi.yaml -im openapi -as -j -o /tmp/nuclei_api.jsonl"
 ```
 
+### Captured traffic (proxy_* tools)
+
+When HTTP Traffic Capture is enabled, `-im burp` (alongside `-im openapi/swagger`) lets Nuclei consume captured traffic as input: build the target/URL list from proxy_sitemap (distinct observed endpoints) and proxy_search (filtered txns) rather than re-crawling. After a run, cross-check each finding's matched-at URL against what was actually captured with proxy_grep (substring over response bodies) and proxy_query, confirming the hit without re-running the tool.
+
 ## Throughput tuning ladder
 
 Tune in this order when the run is too aggressive or too slow:

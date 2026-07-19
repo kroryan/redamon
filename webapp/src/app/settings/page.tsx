@@ -87,7 +87,7 @@ const EMPTY_SETTINGS: UserSettings = {
   ngrokAuthtoken: '',
   chiselServerUrl: '',
   chiselAuth: '',
-  captureProxyEnabled: false,
+  captureProxyEnabled: true,
   captureProxyPort: 8888,
   captureProxyScope: 'both',
   captureProxyStoreBodies: true,
@@ -558,7 +558,7 @@ export default function SettingsPage() {
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
-          captureProxyEnabled: !!data.captureProxyEnabled,
+          captureProxyEnabled: data.captureProxyEnabled ?? true,
           captureProxyPort: data.captureProxyPort ?? 8888,
           captureProxyScope: data.captureProxyScope || 'both',
           captureProxyStoreBodies: data.captureProxyStoreBodies ?? true,
@@ -659,7 +659,7 @@ export default function SettingsPage() {
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
-          captureProxyEnabled: !!data.captureProxyEnabled,
+          captureProxyEnabled: data.captureProxyEnabled ?? true,
           captureProxyPort: data.captureProxyPort ?? 8888,
           captureProxyScope: data.captureProxyScope || 'both',
           captureProxyStoreBodies: data.captureProxyStoreBodies ?? true,
@@ -1638,22 +1638,26 @@ export default function SettingsPage() {
 
       {activeTab === 'system' && (
         <>
+          <SystemSection />
           <div style={{
             background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
             borderRadius: 'var(--radius-md, 8px)', padding: '20px', marginBottom: '20px',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div>
-                <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 'var(--text-lg, 16px)' }}>HTTP Traffic Capture</h3>
+                <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 'var(--text-lg, 16px)', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                  TrafficMind
+                  <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/TrafficMind" title="Open TrafficMind wiki page" />
+                </h3>
                 <p style={{ margin: '4px 0 0', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm, 13px)' }}>
-                  Master switch for the capture proxy. Enabling starts the proxy + ingest containers;
-                  disabling stops them. Per-project routing is set on each project (Traffic Capture section).
+                  Master switch for the TrafficMind capture proxy. Enabling starts the proxy + ingest containers;
+                  disabling stops them. Per-project routing is set on each project (TrafficMind section).
                 </p>
               </div>
               <Toggle
                 checked={settings.captureProxyEnabled}
                 onChange={(v) => { updateSetting('captureProxyEnabled', v); setSettingsDirty(true) }}
-                aria-label="Enable HTTP traffic capture"
+                aria-label="Enable TrafficMind capture"
               />
             </div>
 
@@ -1701,7 +1705,6 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
-          <SystemSection />
         </>
       )}
 

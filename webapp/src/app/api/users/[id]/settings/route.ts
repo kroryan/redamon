@@ -83,7 +83,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         ngrokAuthtoken: '',
         chiselServerUrl: '',
         chiselAuth: '',
-        captureProxyEnabled: false,
+        captureProxyEnabled: true,
         captureProxyPort: 8888,
         captureProxyScope: 'both',
         captureProxyStoreBodies: true,
@@ -198,7 +198,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const captureEnabledProvided = 'captureProxyEnabled' in body
     const captureDesiredEnabled = captureEnabledProvided
       ? Boolean(body.captureProxyEnabled)
-      : (existing?.captureProxyEnabled ?? false)
+      : (existing?.captureProxyEnabled ?? true)
 
     const settings = await prisma.userSettings.upsert({
       where: { userId: id },
@@ -218,7 +218,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     // flipping the master toggle, or changing a runtime knob while enabled, drives
     // the orchestrator capture-proxy/{start,stop}. Best-effort: a save must not
     // fail because the orchestrator is briefly unreachable.
-    const captureEnabledChanged = captureEnabledProvided && captureDesiredEnabled !== (existing?.captureProxyEnabled ?? false)
+    const captureEnabledChanged = captureEnabledProvided && captureDesiredEnabled !== (existing?.captureProxyEnabled ?? true)
     const captureConfigChanged = Object.keys(captureData).length > 0
     if (captureEnabledChanged || (settings.captureProxyEnabled && captureConfigChanged)) {
       const orchUrl = process.env.RECON_ORCHESTRATOR_URL || 'http://recon-orchestrator:8010'

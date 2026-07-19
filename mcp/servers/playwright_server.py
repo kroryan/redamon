@@ -146,6 +146,45 @@ def _capture_playwright_args(ctx_token: str):
     )
 
 
+def _capture_launch_patch(ctx_token: str) -> str:
+    """Monkeypatch fragment for SELF-CONTAINED scripts (they bring their own
+    `sync_playwright()`, so the wrapper's proxy=/extra_http_headers kwargs never
+    apply). Forces every browser launch through the capture proxy and stamps the
+    X-Redamon-Ctx header on every context (new_context also backs Browser.new_page
+    in playwright-python) and persistent context. Empty when not routing (§20.2:
+    proxy + header added together, only when reachable)."""
+    try:
+        from capture_routing import agent_capture_routing
+        cap_url, cap_tok = agent_capture_routing(ctx_token)
+    except Exception:
+        cap_url, cap_tok = (None, None)
+    if not (cap_url and cap_tok):
+        return ""
+    return textwrap.dedent(f"""\
+        import playwright.sync_api as _pw_cap
+        _pw_cap_url = {cap_url!r}
+        _pw_cap_hdr = {{"X-Redamon-Ctx": {cap_tok!r}}}
+        _pw_cap_L = _pw_cap.BrowserType.launch
+        def _pw_cap_launch(self, **kw):
+            kw["proxy"] = {{"server": _pw_cap_url}}
+            return _pw_cap_L(self, **kw)
+        _pw_cap.BrowserType.launch = _pw_cap_launch
+        _pw_cap_C = _pw_cap.Browser.new_context
+        def _pw_cap_new_context(self, **kw):
+            _h = dict(kw.get("extra_http_headers") or {{}}); _h.update(_pw_cap_hdr)
+            kw["extra_http_headers"] = _h
+            return _pw_cap_C(self, **kw)
+        _pw_cap.Browser.new_context = _pw_cap_new_context
+        _pw_cap_P = _pw_cap.BrowserType.launch_persistent_context
+        def _pw_cap_persistent(self, *a, **kw):
+            kw["proxy"] = {{"server": _pw_cap_url}}
+            _h = dict(kw.get("extra_http_headers") or {{}}); _h.update(_pw_cap_hdr)
+            kw["extra_http_headers"] = _h
+            return _pw_cap_P(self, *a, **kw)
+        _pw_cap.BrowserType.launch_persistent_context = _pw_cap_persistent
+    """)
+
+
 def _execute_content_mode(url: str, selector: str, format: str, ctx_token: str = "") -> str:
     """Mode 1: Navigate to URL and extract rendered content."""
     use_html = format.lower() == "html"
@@ -260,9 +299,12 @@ def _execute_script_mode(user_script: str, ctx_token: str = "") -> str:
             )
 
     # Self-contained script (brings its own `sync_playwright()` context): run it raw
-    # so we don't nest two sync contexts. Inject browser args via a launch monkeypatch.
+    # so we don't nest two sync contexts. Inject browser args via a launch monkeypatch,
+    # and (when capture is on) force the proxy + X-Redamon-Ctx via _capture_launch_patch
+    # so self-contained scripts are captured like the wrapped path.
     if _SELF_CONTAINED_RE.search(user_script):
-        return _run_playwright_script(_LAUNCH_PATCH + user_script, timeout=60)
+        return _run_playwright_script(
+            _LAUNCH_PATCH + _capture_launch_patch(ctx_token) + user_script, timeout=60)
 
     # Build wrapper script with correct indentation
     lines = [

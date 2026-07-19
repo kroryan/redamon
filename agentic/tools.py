@@ -60,8 +60,12 @@ from agent_context import (  # noqa: E402
 # when enabled (plan §9.1 allowlist). Deliberately excludes OSINT / API-key tools
 # (cve_intel, shodan, execute_gau, web_search, …) so their keys never touch the
 # proxy (§15.4). The kali MCP servers add the proxy flag + X-Redamon-Ctx header.
+# The HTTP recon/exploit tools below mirror the recon pipeline's routing so the
+# agent's own crawl/fuzz/scan traffic is captured, searchable, and replayable.
 _CAPTURE_ROUTED_TOOLS = frozenset({
     "execute_curl", "execute_httpx", "execute_playwright",
+    "execute_nuclei", "execute_katana", "execute_ffuf",
+    "execute_arjun", "execute_wpscan",
 })
 
 _HTTP_STATUS_RE = re.compile(r"HTTP/\d(?:\.\d)?\s+(\d{3})")

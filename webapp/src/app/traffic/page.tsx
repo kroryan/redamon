@@ -2,9 +2,9 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Network } from 'lucide-react'
+import { Network, PanelRightOpen, Copy } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
-import { Drawer, useToast, useAlertModal } from '@/components/ui'
+import { Drawer, useToast, useAlertModal, WikiInfoButton } from '@/components/ui'
 import {
   useTrafficList,
   useTrafficFacets,
@@ -40,8 +40,12 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
+function fullUrl(d: TrafficDetail): string {
+  return `${d.scheme}://${d.host}${d.port && d.port !== 80 && d.port !== 443 ? ':' + d.port : ''}${d.path}${d.query || ''}`
+}
+
 function toCurl(d: TrafficDetail): string {
-  const url = `${d.scheme}://${d.host}${d.port && d.port !== 80 && d.port !== 443 ? ':' + d.port : ''}${d.path}${d.query || ''}`
+  const url = fullUrl(d)
   const parts = [`curl -i -X ${d.method}`]
   const headers = d.reqHeaders && typeof d.reqHeaders === 'object' ? d.reqHeaders : {}
   for (const [k, v] of Object.entries(headers)) {
@@ -65,6 +69,11 @@ export default function TrafficPage() {
   const facets = useTrafficFacets(projectId)
   const detail = useTrafficDetail(projectId, selectedId)
   const del = useDeleteTraffic(projectId)
+
+  const copyText = useCallback((text: string, what: string) => {
+    navigator.clipboard.writeText(text || '')
+    toast.success(`Copied ${what}`)
+  }, [toast])
   const { dangerConfirm } = useAlertModal()
 
   const toggleSelect = useCallback((id: string) => {
@@ -158,9 +167,10 @@ export default function TrafficPage() {
     <div className={styles.page}>
       <div className={styles.header}>
         <div className={styles.title}>
-          <Network size={18} /> Traffic
+          <Network size={18} /> TrafficMind
         </div>
         <span className={styles.subtitle}>Captured HTTP transactions</span>
+        <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/TrafficMind" title="Open TrafficMind wiki page" />
         <div className={styles.spacer} />
         <span className={styles.count}>{total.toLocaleString()} transactions</span>
         <a className={styles.pageBtn} href={exportUrl('csv')}>Export CSV</a>
@@ -292,6 +302,7 @@ export default function TrafficPage() {
               <th className={styles.sortable} onClick={() => toggleSort('respBodySize')}>Length</th>
               <th className={styles.sortable} onClick={() => toggleSort('responseTimeMs')}>Time (ms)</th>
               <th>Flags</th>
+              <th aria-label="Details"></th>
             </tr>
           </thead>
           <tbody>
@@ -322,6 +333,17 @@ export default function TrafficPage() {
                     {r.isReplay && <span className={styles.flag}>replay</span>}
                     {!r.inScope && <span className={`${styles.flag} ${styles.flagWarn}`}>oos</span>}
                   </span>
+                </td>
+                <td className={styles.detailCell}>
+                  <button
+                    type="button"
+                    className={styles.detailBtn}
+                    aria-label="Open request/response detail"
+                    title="Open detail"
+                    onClick={e => { e.stopPropagation(); setSelectedId(r.id) }}
+                  >
+                    <PanelRightOpen size={18} />
+                  </button>
                 </td>
               </tr>
             ))}
@@ -363,13 +385,20 @@ export default function TrafficPage() {
         {detail.data && (
           <div className={styles.detail}>
             <div className={styles.detailSection}>
-              <div className={styles.detailLabel}>Request</div>
+              <div className={styles.sectionHead}>
+                <span className={styles.detailLabel}>Request</span>
+                <button className={styles.copyBtn} onClick={() => copyText(toCurl(detail.data as TrafficDetail), 'curl command')}>
+                  <Copy size={13} /> Copy as curl
+                </button>
+              </div>
               <dl className={styles.kv}>
                 <dt>URL</dt>
                 <dd className={styles.mono}>
-                  {detail.data.scheme}://{detail.data.host}
-                  {detail.data.port !== 80 && detail.data.port !== 443 ? `:${detail.data.port}` : ''}
-                  {detail.data.path}{detail.data.query || ''}
+                  <span className={styles.urlText}>{fullUrl(detail.data as TrafficDetail)}</span>
+                  <button className={styles.iconCopy} title="Copy URL" aria-label="Copy URL"
+                    onClick={() => copyText(fullUrl(detail.data as TrafficDetail), 'URL')}>
+                    <Copy size={13} />
+                  </button>
                 </dd>
                 <dt>Method</dt><dd className={styles.mono}>{detail.data.method}</dd>
                 <dt>Source</dt><dd>{detail.data.source}{detail.data.tool ? ` · ${detail.data.tool}` : ''}</dd>
@@ -378,11 +407,34 @@ export default function TrafficPage() {
                 {detail.data.targetIp && (<><dt>Target IP</dt><dd className={styles.mono}>{detail.data.targetIp}</dd></>)}
                 {detail.data.tlsVersion && (<><dt>TLS</dt><dd>{detail.data.tlsVersion}</dd></>)}
               </dl>
-              <button className={styles.copyBtn} onClick={() => {
-                navigator.clipboard.writeText(toCurl(detail.data as TrafficDetail))
-                toast.success('Copied curl command')
-              }}>Copy as curl</button>
             </div>
+
+            {detail.data.reqHeaders && Object.keys(detail.data.reqHeaders).length > 0 && (
+              <div className={styles.detailSection}>
+                <div className={styles.sectionHead}>
+                  <span className={styles.detailLabel}>Request headers</span>
+                  <button className={styles.iconCopy} title="Copy request headers" aria-label="Copy request headers"
+                    onClick={() => copyText(JSON.stringify(detail.data!.reqHeaders ?? {}, null, 2), 'request headers')}>
+                    <Copy size={13} />
+                  </button>
+                </div>
+                <pre className={styles.pre}>{JSON.stringify(detail.data.reqHeaders ?? {}, null, 2)}</pre>
+              </div>
+            )}
+
+            {detail.data.reqBody && (
+              <div className={styles.detailSection}>
+                <div className={styles.sectionHead}>
+                  <span className={styles.detailLabel}>Request body</span>
+                  <button className={styles.iconCopy} title="Copy request body" aria-label="Copy request body"
+                    onClick={() => copyText(detail.data!.reqBody ?? '', 'request body')}>
+                    <Copy size={13} />
+                  </button>
+                </div>
+                {/* Rendered as inert text — never HTML. Captured bodies are attacker-controlled (§15.6). */}
+                <pre className={styles.pre}>{detail.data.reqBody}</pre>
+              </div>
+            )}
 
             <div className={styles.detailSection}>
               <div className={styles.detailLabel}>
@@ -390,10 +442,23 @@ export default function TrafficPage() {
                 {' · '}{fmtBytes(detail.data.respBodySize)}
                 {detail.data.respContentType ? ` · ${detail.data.respContentType}` : ''}
               </div>
-              <div className={styles.detailLabel}>Response headers</div>
+              <div className={styles.sectionHead}>
+                <span className={styles.detailLabel}>Response headers</span>
+                <button className={styles.iconCopy} title="Copy response headers" aria-label="Copy response headers"
+                  onClick={() => copyText(JSON.stringify(detail.data!.respHeaders ?? {}, null, 2), 'response headers')}>
+                  <Copy size={13} />
+                </button>
+              </div>
               <pre className={styles.pre}>{JSON.stringify(detail.data.respHeaders ?? {}, null, 2)}</pre>
-              <div className={styles.detailLabel}>
-                Response body{detail.data.respBodyRef ? ' (offloaded — Phase 1)' : ''}
+              <div className={styles.sectionHead}>
+                <span className={styles.detailLabel}>
+                  Response body{detail.data.respBodyRef ? ' (offloaded — Phase 1)' : ''}
+                </span>
+                <button className={styles.iconCopy} title="Copy response body" aria-label="Copy response body"
+                  disabled={!detail.data.respBody}
+                  onClick={() => copyText(detail.data!.respBody ?? '', 'response body')}>
+                  <Copy size={13} />
+                </button>
               </div>
               {/* Rendered as inert text — never HTML. Captured bodies are attacker-controlled (§15.6). */}
               <pre className={styles.pre}>{detail.data.respBody ?? (detail.data.respBodyRef ? '[body stored on disk]' : '[no body]')}</pre>

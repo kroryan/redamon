@@ -194,12 +194,18 @@ class RedamonCapture:
         dest = os.path.join(self.bodies_dir, sha)
         if os.path.exists(dest):
             return  # dedup
-        tmp = os.path.join(self.tmp_dir, f"body-{uuid.uuid4().hex}")
+        # The temp file MUST live in bodies_dir so os.replace is a SAME-FILESYSTEM
+        # rename. /spool and /bodies are separate mounts, so staging the temp in
+        # /spool/.tmp made os.replace raise EXDEV ("cross-device link") — which the
+        # old bare `except OSError` swallowed silently, dropping every offloaded
+        # blob while the DB ref was still written (dangling resp_body_ref rows).
+        tmp = os.path.join(self.bodies_dir, f".tmp-{uuid.uuid4().hex}")
         try:
             with open(tmp, "wb") as f:
                 f.write(raw)
-            os.replace(tmp, dest)  # atomic within the same filesystem
-        except OSError:
+            os.replace(tmp, dest)  # atomic within bodies_dir (same filesystem)
+        except OSError as e:
+            print(f"[capture] body offload failed (sha={sha[:12]}): {e}", flush=True)
             try:
                 os.unlink(tmp)
             except OSError:

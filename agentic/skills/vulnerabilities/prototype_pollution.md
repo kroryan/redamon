@@ -18,6 +18,10 @@ Reference for finding and exploiting JavaScript prototype pollution in browser a
 | Node.js gadget testing locally | `execute_code` (language: bash) -> `node -e '...'` | Try a gadget chain on a downloaded library copy. |
 | Decode bundled libraries | `kali_shell` | `grep -hE 'lodash|jquery|merge|extend|deepmerge'` over JS bundle. |
 
+### Captured-traffic workflow (proxy_* tools)
+
+When HTTP Traffic Capture is enabled, the server-side pollute-then-observe loop maps onto two calls: proxy_replay POSTs the pollution body (`{"__proto__":{"polluted":"yes"}}`) to a captured JSON endpoint, then proxy_get or proxy_grep on a later, unrelated JSON response confirms the property leaked onto every object globally; proxy_diff can compare a pre-pollution and post-pollution response of the same route. Where the proxy stops: bundle/library fingerprinting, client-side gadget XSS (needs execute_playwright), and Node RCE gadget chains stay non-proxy, and proxy_fuzz does not fit here since it iterates a single query param, not a nested JSON body.
+
 ## Anatomy
 
 In JavaScript, every object has a hidden link `__proto__` pointing at its constructor's prototype. Polluting `Object.prototype` (the root) means **every** object in the runtime gains the polluted property.

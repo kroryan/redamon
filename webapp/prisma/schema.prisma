@@ -127,12 +127,12 @@ model UserSettings {
   mcpServers      Json     @default("[]") @map("mcp_servers")
 
   // HTTP Traffic Capture (mitmproxy, Phase 1) — GLOBAL capability switch + config.
-  // Mirrors the tunnelsEnabled posture: the container runs ONLY when the operator
-  // explicitly enables it here; flipping this drives the orchestrator
-  // capture-proxy/{start,stop}. This is distinct from Project.captureProxyEnabled,
+  // ON by default: the proxy + ingest containers are meant to run out of the box;
+  // flipping this drives the orchestrator capture-proxy/{start,stop}. The operator
+  // can still disable it here. This is distinct from Project.captureProxyEnabled,
   // which is the per-project ROUTING gate (whether that project's traffic is sent
   // through the proxy). Container-config below shapes the spawned proxy/ingest.
-  captureProxyEnabled       Boolean @default(false) @map("capture_proxy_enabled")
+  captureProxyEnabled       Boolean @default(true)  @map("capture_proxy_enabled")
   captureProxyPort          Int     @default(8888)  @map("capture_proxy_port")
   captureProxyScope         String  @default("both") @map("capture_proxy_scope")   // recon | agent | both
   captureProxyStoreBodies   Boolean @default(true)  @map("capture_proxy_store_bodies")

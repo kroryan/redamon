@@ -23,7 +23,7 @@ export function GlobalHeader() {
       : []),
     { label: 'CypherFix', href: '/cypherfix', icon: <Shield size={14} /> },
     { label: 'Insights', href: '/insights', icon: <TrendingUp size={14} /> },
-    { label: 'Traffic', href: '/traffic', icon: <Network size={14} /> },
+    { label: 'TrafficMind', href: '/traffic', icon: <Network size={14} /> },
     { label: 'Reports', href: '/reports', icon: <FileText size={14} /> },
   ]
 

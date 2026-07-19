@@ -252,7 +252,9 @@
 }
 
 .copyBtn {
-  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
@@ -261,4 +263,79 @@
   font-size: var(--text-xs);
   cursor: pointer;
 }
-.copyBtn:hover { background: var(--bg-hover); }
+.copyBtn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.copyBtn svg { flex: none; }
+
+/* Section header row: label on the left, a copy button on the right. */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Small square copy button used per section (headers / body / url). */
+.iconCopy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.iconCopy:hover:not(:disabled) {
+  background: var(--accent, var(--bg-hover));
+  border-color: var(--accent, var(--border-default));
+  color: var(--accent-contrast, var(--text-primary));
+}
+.iconCopy:disabled { opacity: 0.4; cursor: not-allowed; }
+.iconCopy svg { flex: none; width: 13px; height: 13px; display: block; }
+
+/* URL cell: text wraps, copy button stays inline at the top-right. */
+.kv dd .urlText { flex: 1 1 auto; min-width: 0; }
+.kv dd:has(.iconCopy) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Per-row "view detail" affordance (opens the drawer). Right-aligned so it sits
+   at the extreme right of each row; the whole row is still clickable. */
+.detailCell { text-align: right; width: 44px; white-space: nowrap; padding-right: 12px; }
+.detailBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+/* Force the lucide SVG to its intended size regardless of any global reset
+   (a width:1% cell + a max-width:100% reset would otherwise collapse it). */
+.detailBtn svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.detailBtn:hover {
+  background: var(--accent, var(--bg-hover));
+  border-color: var(--accent, var(--border-default));
+  color: var(--accent-contrast, var(--text-primary));
+}

@@ -49,6 +49,18 @@ Useful keys to record:
 
 Map every relying party (RP), every IdP, and every resource server. Mix-up and audience-confusion attacks live in those edges.
 
+## Captured-traffic workflow (proxy_* tools)
+
+If HTTP Traffic Capture is enabled, source and drive the flow probes from the recorded redirect chain and token exchanges instead of rebuilding them by hand. proxy_* tools only see traffic that went through the capture proxy, so drive the login (`execute_playwright` or the browser) through it first.
+
+- Pull flow secrets: `proxy_grep("access_token")`, `proxy_grep("code=")`, and `proxy_grep("state=")` extract the `code`, `state`, `nonce`, and issued tokens from captured responses / redirects; `proxy_search({"q":"token"})` locates the `/token` exchange transaction.
+- Code single-use test: `proxy_replay(<token_txn>, {})` re-sends the captured `/token` POST verbatim a second time. A second 200 with a fresh access token proves the authorization code is not single-use (mirrors the Validation script below, without rebuilding the body).
+- Client / redirect binding: `proxy_replay(<token_txn>, {"body":"grant_type=authorization_code&code=<code>&client_id=<other_client>&redirect_uri=https://target.tld/cb&code_verifier=<v>"})` tests whether the code is bound to the original `client_id` and `redirect_uri`.
+- Refresh-token reuse: replay a captured refresh exchange twice, or after logout, with `proxy_replay(<refresh_txn>, {})` to detect missing rotation / revocation.
+- `proxy_diff(<first_exchange>, <replayed_exchange>)` shows whether the second attempt succeeded; `proxy_to_curl(id)` renders the exchange for the report.
+
+Caveat: proxy_replay pins host/scheme/port to the origin, so the redirect-URI interception probes that require an attacker host, and any browser-driven consent step, still need execute_playwright / execute_curl. The token endpoint host is fixed to the captured origin.
+
 ## Flow cheatsheet
 
 | Flow | Use case | Key probes |

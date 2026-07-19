@@ -46,6 +46,10 @@ This workflow uses only tools already present in the agent runtime. No new Kali 
 
 If the operator forbids OOB callbacks, drop the `interactsh-client` step and lean on reflective probes, error-message diffing, and timing oracles instead.
 
+### Captured-traffic workflow (proxy_* tools)
+
+When HTTP Traffic Capture is enabled, proxy_replay re-sends a captured multipart upload with a mutated filename, Content-Type, or body (extension rotation, polyglot magic bytes, a config-file drop, a traversal filename), recorded as a new replay txn. proxy_get then fetches the served file back and proxy_grep inspects the response for execution or inline render plus the load-bearing headers (Content-Type, Content-Disposition, X-Content-Type-Options). Where the proxy stops: byte-level polyglot and toolchain payload crafting still needs execute_code, and stored-XSS or toolchain-RCE proof needs execute_playwright (real browser) or an OOB collector.
+
 ## Workflow
 
 ### Phase 1: Reconnaissance (Informational)

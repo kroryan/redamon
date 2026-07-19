@@ -73,6 +73,15 @@ kali_shell: ldapsearch -x -H ldap://target.tld -b "" -s base "(objectClass=*)" n
 
 Returned `namingContexts` reveal the search base DNs.
 
+### Captured-traffic workflow (proxy_* tools)
+
+If HTTP Traffic Capture is enabled, source and drive this from the recorded history (proxy_* only see traffic that crossed the capture proxy).
+
+- `proxy_params` flags the field that flows into the filter (a `q` / `username` / `group` search param).
+- For a GET search param, `proxy_fuzz id "q" ["*", "*)(uid=*", "alice)(description=A*", "alice)(description=B*"]` drives the auth-bypass and boolean-blind char-by-char set over one captured QUERY param, comparing per-payload length to find the "found / not found" oracle.
+- For body-param login flows (proxy_fuzz only iterates query params), `proxy_replay id mutate:{param:{"username":"alice)(&(1=1)"}}` mutates the username body param.
+- `proxy_diff id_legit id_injected` makes the boolean oracle explicit (legitimate N-result response versus an injected response of different length).
+
 ## Attack matrix
 
 ### Authentication bypass

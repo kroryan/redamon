@@ -80,7 +80,7 @@ RUN PRISMA_VER=$(node -p "require('/tmp/prisma-pkg.json').version") && \
 # Entrypoint: sync schema to PostgreSQL, then start server
 # Entrypoint order matters: `db push` reconciles the schema (and would DROP the
 # FTS objects), so the traffic-FTS apply MUST run immediately after it (§6.3).
-RUN printf '#!/bin/sh\necho "Syncing Prisma schema..."\nnode node_modules/prisma/build/index.js db push --skip-generate --accept-data-loss --schema ./prisma/schema.prisma 2>&1\nnode scripts/apply-traffic-fts.mjs 2>&1\nexec node server.js\n' > /app/entrypoint.sh \
+RUN printf '#!/bin/sh\necho "Syncing Prisma schema..."\nnode node_modules/prisma/build/index.js db push --skip-generate --accept-data-loss --schema ./prisma/schema.prisma 2>&1\nnode scripts/apply-ingest-role.mjs 2>&1\nnode scripts/apply-traffic-fts.mjs 2>&1\nexec node server.js\n' > /app/entrypoint.sh \
     && chmod +x /app/entrypoint.sh
 
 USER nextjs

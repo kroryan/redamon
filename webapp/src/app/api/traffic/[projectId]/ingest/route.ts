@@ -21,9 +21,30 @@ const MAX_TXNS_PER_REQUEST = 2000
 
 const VALID_SOURCES = new Set(['recon', 'agent'])
 
+// Postgres text AND jsonb reject NUL (0x00) with error 22021: a single such byte
+// in any captured (attacker-controlled) field makes the whole createMany batch fail
+// and drops every httpx transaction in it. Strip NUL everywhere a captured string
+// reaches the DB. (The proxy-path Python ingest worker strips it too.)
+function stripNul(s: string): string {
+  return s.indexOf('\u0000') === -1 ? s : s.replace(/\u0000/g, '')
+}
+
 function asString(v: unknown): string | null {
   if (v === null || v === undefined) return null
-  return typeof v === 'string' ? v : String(v)
+  return stripNul(typeof v === 'string' ? v : String(v))
+}
+
+// Recursively strip NUL from string keys/values so header JSON (respHeaders /
+// reqHeaders) can't 22021 the jsonb insert either.
+function stripNulDeep(v: unknown): unknown {
+  if (typeof v === 'string') return stripNul(v)
+  if (Array.isArray(v)) return v.map(stripNulDeep)
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[stripNul(k)] = stripNulDeep(val)
+    return out
+  }
+  return v
 }
 
 function asInt(v: unknown): number | null {
@@ -42,7 +63,7 @@ function clampInt4(v: number | null): number | null {
 }
 
 function asJson(v: unknown): Prisma.InputJsonValue {
-  if (v && typeof v === 'object') return v as Prisma.InputJsonValue
+  if (v && typeof v === 'object') return stripNulDeep(v) as Prisma.InputJsonValue
   return {}
 }
 
