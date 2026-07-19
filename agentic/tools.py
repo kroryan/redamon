@@ -64,6 +64,13 @@ _CAPTURE_ROUTED_TOOLS = frozenset({
     "execute_curl", "execute_httpx", "execute_playwright",
 })
 
+# Captured-traffic read/analyze tools (Phase 4 §10.4) — dispatched by passing the
+# structured tool_args straight through, like other in-process tools.
+try:
+    from traffic_tools import TRAFFIC_READ_TOOL_NAMES as _TRAFFIC_READ_TOOL_NAMES
+except Exception:  # noqa: BLE001 — keep tools.py importable even if the module is absent
+    _TRAFFIC_READ_TOOL_NAMES = frozenset()
+
 
 # =============================================================================
 # SYSTEM MCP SERVERS (baseline — shipped with the product, not user-managed)
@@ -1655,6 +1662,16 @@ class PhaseAwareToolExecutor:
         if tradecraft_tool:
             self._all_tools["tradecraft_lookup"] = tradecraft_tool
 
+        # Register the captured-traffic read/analyze tools (Phase 4, §10.4).
+        # In-process (like query_graph), tenant-scoped from ContextVars — NOT in
+        # _mcp_tool_names, so they never trigger an MCP reconnect.
+        try:
+            from traffic_tools import build_traffic_read_tools
+            for _name, _tool in build_traffic_read_tools().items():
+                self._all_tools[_name] = _tool
+        except Exception as _tt_err:  # noqa: BLE001
+            logger.warning(f"Failed to register traffic read tools: {_tt_err}")
+
     def register_mcp_tools(
         self,
         tools: List,
@@ -1982,7 +1999,10 @@ class PhaseAwareToolExecutor:
         # Dispatch logic pulled into a closure so we can re-invoke with a
         # fresh tool reference after an MCP reconnect.
         async def _invoke(active_tool) -> str:
-            if tool_name == "query_graph":
+            if tool_name in _TRAFFIC_READ_TOOL_NAMES:
+                # Captured-traffic read tools take structured args by name.
+                output = await active_tool.ainvoke(tool_args)
+            elif tool_name == "query_graph":
                 output = await active_tool.ainvoke(tool_args.get("question", ""))
             elif tool_name == "web_search":
                 output = await active_tool.ainvoke(tool_args.get("query", ""))

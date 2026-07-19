@@ -191,6 +191,16 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     # Tool Phase Restrictions
     'TOOL_PHASE_MAP': {
         'query_graph': ['informational', 'exploitation', 'post_exploitation'],
+        # Captured-traffic read/analyze tools (Phase 4 §10.4) — read-only over
+        # already-captured data, useful in every phase (like query_graph).
+        'proxy_search': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_get': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_sitemap': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_params': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_grep': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_diff': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_to_curl': ['informational', 'exploitation', 'post_exploitation'],
+        'proxy_query': ['informational', 'exploitation', 'post_exploitation'],
         'execute_curl': ['informational', 'exploitation', 'post_exploitation'],
         'execute_naabu': ['informational', 'exploitation'],
         'execute_httpx': ['informational', 'exploitation'],

@@ -19,6 +19,64 @@ _registry_lock = threading.RLock()
 
 
 TOOL_REGISTRY = {
+    # ===== Captured HTTP traffic (Phase 4 §10.4) — the "Burp history" =====
+    "proxy_search": {
+        "purpose": "Search captured HTTP traffic (request history)",
+        "when_to_use": "See what requests/responses have been captured; filter by host/status/tool/flags",
+        "args_format": '"filters": "optional JSON e.g. {\\"host\\":\\"x\\",\\"only5xx\\":true,\\"hasAuth\\":true,\\"limit\\":50}"',
+        "description": (
+            '**proxy_search** — the captured HTTP request history (Burp-style)\n'
+            '   - Returns transaction SUMMARIES (id, method, status, host, path, size, tool, flags); NEVER bodies\n'
+            '   - Filters: host, method, status, statusClass(2xx..5xx), tool, source, sessionId, runId, hasAuth, reflected, only5xx, q(url), bodyq(body), limit\n'
+            '   - Use the ids it returns with proxy_get / proxy_diff / proxy_to_curl'
+        ),
+    },
+    "proxy_get": {
+        "purpose": "Fetch one captured request/response in full",
+        "when_to_use": "Pull a specific transaction's headers + body into context on demand",
+        "args_format": '"id": "<transaction id>", "part": "response|request|both"',
+        "description": '**proxy_get** — full headers + body of ONE captured transaction by id (bodies are never in summaries; fetch only what you need).',
+    },
+    "proxy_sitemap": {
+        "purpose": "Aggregated observed attack surface",
+        "when_to_use": "What endpoints (host+path+method) actually exist, with hit counts + status classes",
+        "args_format": "(no args)",
+        "description": '**proxy_sitemap** — distinct endpoints observed in captured traffic; "what exists", not every request.',
+    },
+    "proxy_params": {
+        "purpose": "Distinct parameters + injectability heuristics",
+        "when_to_use": "Find params for IDOR/injection (sequential-id / uuid / jwt / base64 leads)",
+        "args_format": "(no args)",
+        "description": '**proxy_params** — distinct request params observed, with sample values + a type heuristic (IDOR/injection leads).',
+    },
+    "proxy_grep": {
+        "purpose": "Substring search across response bodies",
+        "when_to_use": "Find reflected input, leaked secrets/keys, stack traces, hardcoded endpoints",
+        "args_format": '"pattern": "text to find", "limit": 50',
+        "description": '**proxy_grep** — case-insensitive substring search across captured response bodies; returns matches + a snippet.',
+    },
+    "proxy_diff": {
+        "purpose": "Structural diff of two responses",
+        "when_to_use": "Boolean-blind SQLi / IDOR / auth-bypass: compare a baseline vs a variant response",
+        "args_format": '"id_a": "<id>", "id_b": "<id>"',
+        "description": '**proxy_diff** — diff two captured responses (status, length, headers, body).',
+    },
+    "proxy_to_curl": {
+        "purpose": "Render a captured request as curl",
+        "when_to_use": "Produce a reproducible PoC / report evidence / handoff to kali_shell",
+        "args_format": '"id": "<transaction id>"',
+        "description": '**proxy_to_curl** — render a captured request as a runnable `curl` command (read-only; sends nothing).',
+    },
+    "proxy_query": {
+        "purpose": "Ad-hoc analytical query over the traffic table",
+        "when_to_use": "Questions the shaped proxy_* tools do not cover (counts, group-bys, correlations)",
+        "args_format": '"spec": "JSON: {select:[{agg:\\"count\\"}], where:[{col,op,val}], group_by:[..], order_by:[..], limit:N}"',
+        "description": (
+            '**proxy_query** — ad-hoc analytical query over captured traffic (escape hatch)\n'
+            '   - JSON spec from an ALLOWLIST (no raw SQL); select columns/aggregations, where(op: = != > >= < <= like is_null not_null), group_by, order_by, limit\n'
+            '   - Your project + user scope is always enforced automatically'
+        ),
+    },
     "query_graph": {
         "purpose": "Neo4j database queries",
         "when_to_use": "PRIMARY - Check graph first for recon data",
