@@ -23,6 +23,9 @@ export function GlobalHeader() {
       : []),
     { label: 'CypherFix', href: '/cypherfix', icon: <Shield size={14} /> },
     { label: 'Insights', href: '/insights', icon: <TrendingUp size={14} /> },
+    // TrafficMind table view is visible to everyone (view captured traffic for
+    // their project). Only the TrafficMind *settings* (egress guard, master
+    // switch) are admin-only, gated in Global Settings.
     { label: 'TrafficMind', href: '/traffic', icon: <Network size={14} />, isNew: true },
     { label: 'Reports', href: '/reports', icon: <FileText size={14} /> },
   ]

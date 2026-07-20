@@ -770,6 +770,34 @@ export default function SettingsPage() {
     setSettingsDirty(true)
   }, [])
 
+  // Egress-guard toggles persist IMMEDIATELY (no "Save Settings" click needed).
+  // Each flip PUTs just that field; the server reconciles the shared proxy with
+  // the new policy. Optimistic update with revert on failure. Admin-only server
+  // side, so a non-admin write is rejected and reverted here.
+  const saveEgressToggle = useCallback(async (field: EgressToggleKey, value: boolean) => {
+    setSettings(prev => ({ ...prev, [field]: value }))  // optimistic
+    try {
+      const res = await fetch(`/api/users/${userId}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      })
+      if (!res.ok) throw new Error(String(res.status))
+      // Confirm it actually persisted (the server strips capture fields from
+      // non-admin writes and still returns 200), so read it back.
+      const saved = await res.json().catch(() => null)
+      if (saved && typeof saved[field] === 'boolean' && saved[field] !== value) {
+        throw new Error('not-persisted')
+      }
+      toast.success(`Egress guard: ${field.replace(/^captureEgress/, '')} ${value ? 'blocking' : 'allowed'}`)
+    } catch (e) {
+      setSettings(prev => ({ ...prev, [field]: !value }))  // revert
+      toast.error(String(e).includes('not-persisted')
+        ? 'Not saved: TrafficMind egress settings are admin-only'
+        : 'Failed to update egress guard')
+    }
+  }, [userId, toast])
+
   const toggleFieldVisibility = useCallback((field: string) => {
     setVisibleFields(prev => ({ ...prev, [field]: !prev[field] }))
   }, [])
@@ -1821,7 +1849,7 @@ export default function SettingsPage() {
                       </span>
                       <Toggle
                         checked={settings[t.key]}
-                        onChange={(v) => { updateSetting(t.key, v); setSettingsDirty(true) }}
+                        onChange={(v) => saveEgressToggle(t.key, v)}
                         aria-label={t.title}
                       />
                     </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useAuth } from '@/providers/AuthProvider'
 
 /**
  * Read-only per-project TrafficMind capture-routing status for the /traffic page
@@ -17,6 +18,7 @@ export function TrafficCaptureStatus({
   projectName?: string | null
 }) {
   const [enabled, setEnabled] = useState<boolean | null>(null)
+  const { isAdmin } = useAuth()
 
   useEffect(() => {
     let cancelled = false
@@ -41,7 +43,9 @@ export function TrafficCaptureStatus({
       </span>
       {!on && (
         <span style={{ color: 'var(--text-tertiary)' }}>
-          Enable it per project in <strong style={{ color: 'var(--text-secondary)' }}>Global Settings &rarr; TrafficMind</strong>.
+          {isAdmin
+            ? <>Enable it per project in <strong style={{ color: 'var(--text-secondary)' }}>Global Settings &rarr; TrafficMind</strong>.</>
+            : 'Ask an administrator to enable it.'}
         </span>
       )}
     </div>
