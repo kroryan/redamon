@@ -35,6 +35,19 @@ class CaptureProxyConfig(BaseModel):
     redactSecrets: Optional[bool] = None
     scope: Optional[str] = None
     blockedIps: Optional[str] = None
+    # Egress-guard toggles (Global Settings > TrafficMind). Each defaults to block
+    # (True) both here and in the proxy, so omitting any keeps the always-on guard.
+    egressBlockEmptyHost: Optional[bool] = None
+    egressBlockHardGuardrail: Optional[bool] = None
+    egressFailClosed: Optional[bool] = None
+    egressBlockUnresolvable: Optional[bool] = None
+    egressBlockPrivate: Optional[bool] = None
+    egressBlockLoopback: Optional[bool] = None
+    egressBlockLinkLocal: Optional[bool] = None
+    egressBlockCgnat: Optional[bool] = None
+    egressBlockReserved: Optional[bool] = None
+    egressBlockMulticast: Optional[bool] = None
+    egressBlockUnspecified: Optional[bool] = None
 
 
 class ReconState(BaseModel):

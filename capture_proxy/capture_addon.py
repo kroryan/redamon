@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from mitmproxy import http
 
 from capture_lib import build_record, decide_body, normalize_headers, sha256_hex
-from egress import check_egress
+from egress import check_egress, policy_from_env
 
 try:
     from hard_guardrail import is_hard_blocked  # bundled into the image
@@ -70,6 +70,11 @@ class RedamonCapture:
         self.max_body_bytes = int(os.environ.get("CAPTURE_PROXY_MAX_BODY_KB", "64") or "64") * 1024
         self.store_bodies = os.environ.get("CAPTURE_PROXY_STORE_BODIES", "true").lower() != "false"
         self.extra_blocked_ips = [ip for ip in os.environ.get("CAPTURE_BLOCKED_IPS", "").split(",") if ip.strip()]
+        # Egress-guard policy from CAPTURE_EGRESS_* env (every check defaults to
+        # block, so an unset/typo'd var can never relax the guard). Surfaced in
+        # Global Settings > TrafficMind and injected at spawn by the orchestrator.
+        self.egress_policy = policy_from_env(os.environ)
+        print(f"[capture] egress policy: {self.egress_policy}", flush=True)
         self.tmp_dir = os.path.join(self.spool_dir, ".tmp")
         os.makedirs(self.tmp_dir, exist_ok=True)
         os.makedirs(self.bodies_dir, exist_ok=True)
@@ -97,9 +102,17 @@ class RedamonCapture:
             allowed, pinned_ip, reason = check_egress(
                 flow.request.pretty_host, hard_blocked=_hard_blocked,
                 extra_blocked_ips=self.extra_blocked_ips,
+                policy=self.egress_policy,
             )
-        except Exception as e:  # fail CLOSED — never forward on a guard error
-            allowed, pinned_ip, reason = (False, None, f"guard-error:{e}")
+        except Exception as e:
+            # On a guard-internal error: fail CLOSED (block) by default. The
+            # operator can flip this to fail-open via the "Fail closed on guard
+            # error" toggle; dangerous, but exposed for completeness. Fail-open
+            # forwards WITHOUT IP pinning (mitmproxy resolves + connects normally).
+            if self.egress_policy.fail_closed_on_error:
+                allowed, pinned_ip, reason = (False, None, f"guard-error:{e}")
+            else:
+                allowed, pinned_ip, reason = (True, None, f"guard-error-failopen:{e}")
 
         if not allowed:
             # Refuse: do not forward. Record the attempt for the scope audit.

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Network, PanelRightOpen, Copy } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
 import { Drawer, useToast, useAlertModal, WikiInfoButton } from '@/components/ui'
-import { TrafficCaptureToggle } from '@/components/traffic/TrafficCaptureToggle'
+import { TrafficCaptureStatus } from '@/components/traffic/TrafficCaptureStatus'
 import {
   useTrafficList,
   useTrafficFacets,
@@ -174,7 +174,7 @@ export default function TrafficPage() {
         <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/TrafficMind" title="Open TrafficMind wiki page" />
         <div className={styles.spacer} />
         {projectId && (
-          <TrafficCaptureToggle projectId={projectId} projectName={currentProject?.name} />
+          <TrafficCaptureStatus projectId={projectId} projectName={currentProject?.name} />
         )}
         <span className={styles.count}>{total.toLocaleString()} transactions</span>
         <a className={styles.pageBtn} href={exportUrl('csv')}>Export CSV</a>

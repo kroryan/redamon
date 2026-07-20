@@ -981,6 +981,26 @@ class ContainerManager:
         redact = self._bool_env(config.get("redactSecrets"), os.environ.get("CAPTURE_PROXY_REDACT_SECRETS", "true"))
         blocked_ips = config.get("blockedIps") or os.environ.get("CAPTURE_BLOCKED_IPS", "")
 
+        # Egress-guard toggles (Global Settings > TrafficMind). Each config key maps
+        # to a CAPTURE_EGRESS_* env the proxy addon reads (egress.policy_from_env).
+        # Default is block (True); an omitted/None key keeps the always-on guard.
+        _egress_map = {
+            "egressBlockEmptyHost":     ("CAPTURE_EGRESS_BLOCK_EMPTY_HOST",     "CAPTURE_EGRESS_BLOCK_EMPTY_HOST"),
+            "egressBlockHardGuardrail": ("CAPTURE_EGRESS_BLOCK_HARD_GUARDRAIL", "CAPTURE_EGRESS_BLOCK_HARD_GUARDRAIL"),
+            "egressFailClosed":         ("CAPTURE_EGRESS_FAIL_CLOSED",          "CAPTURE_EGRESS_FAIL_CLOSED"),
+            "egressBlockUnresolvable":  ("CAPTURE_EGRESS_BLOCK_UNRESOLVABLE",   "CAPTURE_EGRESS_BLOCK_UNRESOLVABLE"),
+            "egressBlockPrivate":       ("CAPTURE_EGRESS_BLOCK_PRIVATE",        "CAPTURE_EGRESS_BLOCK_PRIVATE"),
+            "egressBlockLoopback":      ("CAPTURE_EGRESS_BLOCK_LOOPBACK",       "CAPTURE_EGRESS_BLOCK_LOOPBACK"),
+            "egressBlockLinkLocal":     ("CAPTURE_EGRESS_BLOCK_LINK_LOCAL",     "CAPTURE_EGRESS_BLOCK_LINK_LOCAL"),
+            "egressBlockCgnat":         ("CAPTURE_EGRESS_BLOCK_CGNAT",          "CAPTURE_EGRESS_BLOCK_CGNAT"),
+            "egressBlockReserved":      ("CAPTURE_EGRESS_BLOCK_RESERVED",       "CAPTURE_EGRESS_BLOCK_RESERVED"),
+            "egressBlockMulticast":     ("CAPTURE_EGRESS_BLOCK_MULTICAST",      "CAPTURE_EGRESS_BLOCK_MULTICAST"),
+            "egressBlockUnspecified":   ("CAPTURE_EGRESS_BLOCK_UNSPECIFIED",    "CAPTURE_EGRESS_BLOCK_UNSPECIFIED"),
+        }
+        egress_env = {}
+        for cfg_key, (env_key, host_env) in _egress_map.items():
+            egress_env[env_key] = self._bool_env(config.get(cfg_key), os.environ.get(host_env, "true"))
+
         # Idempotent: clear any stale instances first.
         self._remove_container_if_exists(self.CAPTURE_PROXY_NAME)
         self._remove_container_if_exists(self.TRAFFIC_INGEST_NAME)
@@ -1008,6 +1028,7 @@ class ContainerManager:
                 "CAPTURE_PROXY_MAX_BODY_KB": max_body_kb,
                 "CAPTURE_PROXY_STORE_BODIES": store_bodies,
                 "CAPTURE_BLOCKED_IPS": blocked_ips,
+                **egress_env,
             },
             volumes={**spool_vols, "redamon_capture_ca": {"bind": "/ca", "mode": "rw"}},
             cap_drop=["ALL"],

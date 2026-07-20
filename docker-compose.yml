@@ -922,7 +922,23 @@ services:
       CAPTURE_PROXY_STORE_BODIES: "${CAPTURE_PROXY_STORE_BODIES:-true}"
       # Extra RedAmon service IPs the proxy must never reach (defense in depth on
       # top of the RFC1918/loopback denylist; pentest-net placement already blocks).
+      # ALWAYS enforced; never gated by the CAPTURE_EGRESS_* toggles below.
       CAPTURE_BLOCKED_IPS: "${CAPTURE_BLOCKED_IPS:-}"
+      # Egress-guard toggles (Global Settings > TrafficMind). All default true
+      # (block); the out-of-the-box guard. The orchestrator-spawned proxy gets
+      # these injected per the UI toggles; these entries only shape the static
+      # `--profile capture` proxy. Set a var false to ALLOW that destination class.
+      CAPTURE_EGRESS_BLOCK_EMPTY_HOST: "${CAPTURE_EGRESS_BLOCK_EMPTY_HOST:-true}"
+      CAPTURE_EGRESS_BLOCK_HARD_GUARDRAIL: "${CAPTURE_EGRESS_BLOCK_HARD_GUARDRAIL:-true}"
+      CAPTURE_EGRESS_FAIL_CLOSED: "${CAPTURE_EGRESS_FAIL_CLOSED:-true}"
+      CAPTURE_EGRESS_BLOCK_UNRESOLVABLE: "${CAPTURE_EGRESS_BLOCK_UNRESOLVABLE:-true}"
+      CAPTURE_EGRESS_BLOCK_PRIVATE: "${CAPTURE_EGRESS_BLOCK_PRIVATE:-true}"
+      CAPTURE_EGRESS_BLOCK_LOOPBACK: "${CAPTURE_EGRESS_BLOCK_LOOPBACK:-true}"
+      CAPTURE_EGRESS_BLOCK_LINK_LOCAL: "${CAPTURE_EGRESS_BLOCK_LINK_LOCAL:-true}"
+      CAPTURE_EGRESS_BLOCK_CGNAT: "${CAPTURE_EGRESS_BLOCK_CGNAT:-true}"
+      CAPTURE_EGRESS_BLOCK_RESERVED: "${CAPTURE_EGRESS_BLOCK_RESERVED:-true}"
+      CAPTURE_EGRESS_BLOCK_MULTICAST: "${CAPTURE_EGRESS_BLOCK_MULTICAST:-true}"
+      CAPTURE_EGRESS_BLOCK_UNSPECIFIED: "${CAPTURE_EGRESS_BLOCK_UNSPECIFIED:-true}"
     # Target-facing plane ONLY. No redamon-network -> structurally cannot reach
     # Postgres/Neo4j/agent/webapp/orchestrator. Holds NO DB creds, NO signing key.
     networks:

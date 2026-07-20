@@ -304,6 +304,25 @@ flowchart TD
    A name resolving to one public + one internal address is treated as hostile.
    Every error path fails **closed** (unparseable IP, unresolvable name, bad IDNA
    label all block).
+
+   **Configurable per condition.** Each block condition is an independent toggle
+   in an [`EgressPolicy`](../capture_proxy/egress.py), surfaced in *Global
+   Settings > TrafficMind > Egress guard* and injected at proxy spawn as
+   `CAPTURE_EGRESS_*` env (`policy_from_env`). **Every check defaults to block**,
+   so `EgressPolicy()` reproduces the always-on guard and every existing caller /
+   test is unchanged. An operator can relax one class, most usefully
+   `block_private`, to let the proxy reach an internal / lab target on a private
+   Docker network, *without* weakening the others, because each address class has
+   its own independent check (relaxing RFC1918 does not un-block `127.0.0.1`, which
+   is still caught by `block_loopback`). Two safety invariants hold regardless of
+   the toggles: (a) the explicit `extra_blocked` IP denylist (`CAPTURE_BLOCKED_IPS`,
+   RedAmon's own service IPs) is **never** policy-gated, so unblocking private
+   targets cannot pivot into RedAmon itself; and (b) `check_egress` returns
+   `allowed=True` only with a concrete pinned IP, so an empty / unresolvable host
+   is never forwarded even if its toggle is off (the toggle only relabels the
+   refusal). The `fail_closed_on_error` toggle governs the guard-internal-error
+   path: on (default) an error blocks; off makes it fail-open (forward without
+   vetting); exposed for completeness, but dangerous.
 3. **IP pin.** On allow it sets `flow.server_conn.address` to the exact vetted IP,
    so mitmproxy does not re-resolve and land on a rebound internal address between
    the guard check and the connection (a DNS-rebinding TOCTOU). Only the
@@ -654,6 +673,21 @@ ones are pushed to the orchestrator on the settings save.
 | `captureProxyRedactSecrets` | UserSettings | true | redact sensitive headers |
 | `captureProxyPassiveDetect` | UserSettings | true | compute passive signals |
 | `captureProxyRetentionDays` | UserSettings | 14 | maintenance retention (`<= 0` = forever) |
+| `captureEgressBlockEmptyHost` | UserSettings | true | egress guard: block empty Host |
+| `captureEgressBlockHardGuardrail` | UserSettings | true | egress guard: block `.gov/.mil/.edu/.int` + denylist |
+| `captureEgressFailClosed` | UserSettings | true | egress guard: fail closed on guard error (off = fail-open, dangerous) |
+| `captureEgressBlockUnresolvable` | UserSettings | true | egress guard: block unresolvable / bad-IDNA hosts |
+| `captureEgressBlockPrivate` | UserSettings | true | egress guard: block RFC1918 + IPv6 ULA (off = reach private/lab targets) |
+| `captureEgressBlockLoopback` | UserSettings | true | egress guard: block `127.0.0.0/8`, `::1` |
+| `captureEgressBlockLinkLocal` | UserSettings | true | egress guard: block `169.254.0.0/16` (incl. metadata), `fe80::/10` |
+| `captureEgressBlockCgnat` | UserSettings | true | egress guard: block `100.64.0.0/10` |
+| `captureEgressBlockReserved` | UserSettings | true | egress guard: block IANA-reserved ranges |
+| `captureEgressBlockMulticast` | UserSettings | true | egress guard: block `224.0.0.0/4`, `ff00::/8` |
+| `captureEgressBlockUnspecified` | UserSettings | true | egress guard: block `0.0.0.0`, `::` |
+
+The eleven `captureEgress*` fields are pushed to the orchestrator on save (as the
+`egress*` keys of `CaptureProxyConfig`) and injected into the spawned proxy as the
+`CAPTURE_EGRESS_*` env below. All default **true** (block).
 
 ### Environment variables
 
@@ -665,7 +699,18 @@ ones are pushed to the orchestrator on the settings save.
 | `CAPTURE_PROXY_STORE_BODIES` | true | proxy | store bodies at all |
 | `CAPTURE_PROXY_REDACT_SECRETS` | true | ingest | redact sensitive headers |
 | `CAPTURE_REDACT_SALT` | `redamon-capture` | ingest | salt for redaction hash |
-| `CAPTURE_BLOCKED_IPS` | (empty) | proxy | extra egress denylist |
+| `CAPTURE_BLOCKED_IPS` | (empty) | proxy | extra egress denylist (**always enforced**, never policy-gated) |
+| `CAPTURE_EGRESS_BLOCK_EMPTY_HOST` | true | proxy | egress guard: block empty Host |
+| `CAPTURE_EGRESS_BLOCK_HARD_GUARDRAIL` | true | proxy | egress guard: block `.gov/.mil/.edu/.int` + denylist |
+| `CAPTURE_EGRESS_FAIL_CLOSED` | true | proxy | egress guard: fail closed on guard error (false = fail-open) |
+| `CAPTURE_EGRESS_BLOCK_UNRESOLVABLE` | true | proxy | egress guard: block unresolvable / bad-IDNA |
+| `CAPTURE_EGRESS_BLOCK_PRIVATE` | true | proxy | egress guard: block RFC1918 + IPv6 ULA |
+| `CAPTURE_EGRESS_BLOCK_LOOPBACK` | true | proxy | egress guard: block loopback |
+| `CAPTURE_EGRESS_BLOCK_LINK_LOCAL` | true | proxy | egress guard: block link-local (incl. metadata) |
+| `CAPTURE_EGRESS_BLOCK_CGNAT` | true | proxy | egress guard: block CGNAT `100.64/10` |
+| `CAPTURE_EGRESS_BLOCK_RESERVED` | true | proxy | egress guard: block reserved ranges |
+| `CAPTURE_EGRESS_BLOCK_MULTICAST` | true | proxy | egress guard: block multicast |
+| `CAPTURE_EGRESS_BLOCK_UNSPECIFIED` | true | proxy | egress guard: block `0.0.0.0` / `::` |
 | `CAPTURE_QUEUE_MAX` | 2000 | proxy | backpressure queue size |
 | `CAPTURE_PROXY_MAX_ROWS_PER_PROJECT` | 200000 | maintenance | per-project quota eviction |
 | `TRAFFIC_INGEST_DATABASE_URL` | (empty) | ingest | scoped INSERT-only DSN |

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
-import { isInternalRequest, isScannerRequest, requireUserAccess } from '@/lib/session'
+import { getSession, isInternalRequest, isScannerRequest, requireUserAccess } from '@/lib/session'
 import { orchestratorFetch } from '@/lib/orchestrator'
 
 interface RouteParams {
@@ -91,6 +91,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         captureProxyRetentionDays: 14,
         captureProxyRedactSecrets: true,
         captureProxyPassiveDetect: true,
+        captureEgressBlockEmptyHost: true,
+        captureEgressBlockHardGuardrail: true,
+        captureEgressFailClosed: true,
+        captureEgressBlockUnresolvable: true,
+        captureEgressBlockPrivate: true,
+        captureEgressBlockLoopback: true,
+        captureEgressBlockLinkLocal: true,
+        captureEgressBlockCgnat: true,
+        captureEgressBlockReserved: true,
+        captureEgressBlockMulticast: true,
+        captureEgressBlockUnspecified: true,
         rotationConfigs,
       })
     }
@@ -150,6 +161,22 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     const body = await request.json()
 
+    // TrafficMind capture-proxy config (incl. the egress guard) is a GLOBAL,
+    // admin-only control: there is a single shared proxy serving every user and
+    // project, so these settings propagate to all of them. The UI hides the card
+    // from non-admins; enforce it server-side too (defense in depth) by stripping
+    // every capture*/captureEgress* field from a write that is neither an admin
+    // (UI) nor a trusted service (internal/scanner) request. A non-admin can still
+    // save their own non-capture settings; the capture fields are simply ignored,
+    // so the shared guard cannot be changed by a direct API call.
+    const isServiceReq = isInternalRequest(request) || isScannerRequest(request)
+    const captureAdminOK = isServiceReq || (await getSession())?.role === 'admin'
+    if (!captureAdminOK) {
+      for (const k of Object.keys(body)) {
+        if (k.startsWith('captureProxy') || k.startsWith('captureEgress')) delete body[k]
+      }
+    }
+
     // If a masked value is sent back, preserve the existing value
     const existing = await prisma.userSettings.findUnique({
       where: { userId: id },
@@ -179,7 +206,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     // HTTP Traffic Capture (Phase 1) global config. Booleans/ints, so — like
     // tunnelsEnabled — they cannot ride the string `data` loop above.
-    const captureBoolFields = ['captureProxyStoreBodies', 'captureProxyRedactSecrets', 'captureProxyPassiveDetect'] as const
+    const captureBoolFields = ['captureProxyStoreBodies', 'captureProxyRedactSecrets', 'captureProxyPassiveDetect',
+      // Egress-guard toggles (Global Settings > TrafficMind). All default true (block).
+      'captureEgressBlockEmptyHost', 'captureEgressBlockHardGuardrail', 'captureEgressFailClosed',
+      'captureEgressBlockUnresolvable', 'captureEgressBlockPrivate', 'captureEgressBlockLoopback',
+      'captureEgressBlockLinkLocal', 'captureEgressBlockCgnat', 'captureEgressBlockReserved',
+      'captureEgressBlockMulticast', 'captureEgressBlockUnspecified'] as const
     const captureIntFields = ['captureProxyPort', 'captureProxyMaxBodyKb', 'captureProxyRetentionDays'] as const
     const captureData: Record<string, boolean | number | string> = {}
     for (const f of captureBoolFields) if (f in body) captureData[f] = Boolean(body[f])
@@ -233,6 +265,18 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
               storeBodies: settings.captureProxyStoreBodies,
               redactSecrets: settings.captureProxyRedactSecrets,
               scope: settings.captureProxyScope,
+              // Egress-guard toggles -> CAPTURE_EGRESS_* env at proxy spawn.
+              egressBlockEmptyHost: settings.captureEgressBlockEmptyHost,
+              egressBlockHardGuardrail: settings.captureEgressBlockHardGuardrail,
+              egressFailClosed: settings.captureEgressFailClosed,
+              egressBlockUnresolvable: settings.captureEgressBlockUnresolvable,
+              egressBlockPrivate: settings.captureEgressBlockPrivate,
+              egressBlockLoopback: settings.captureEgressBlockLoopback,
+              egressBlockLinkLocal: settings.captureEgressBlockLinkLocal,
+              egressBlockCgnat: settings.captureEgressBlockCgnat,
+              egressBlockReserved: settings.captureEgressBlockReserved,
+              egressBlockMulticast: settings.captureEgressBlockMulticast,
+              egressBlockUnspecified: settings.captureEgressBlockUnspecified,
             }),
           })
         } else {

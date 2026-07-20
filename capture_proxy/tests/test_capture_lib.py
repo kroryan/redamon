@@ -73,6 +73,36 @@ class TestEgress(unittest.TestCase):
         allowed, _, reason = egress.check_egress("1.1.1.1", hard_blocked=boom)
         self.assertFalse(allowed)
 
+    # --- EgressPolicy toggles ---------------------------------------------
+    def test_default_policy_matches_always_on(self):
+        # Passing DEFAULT_POLICY explicitly == the old always-on behavior.
+        self.assertTrue(egress.is_internal_ip("172.24.0.8"))
+        self.assertTrue(egress.is_internal_ip("172.24.0.8", policy=egress.DEFAULT_POLICY))
+
+    def test_relax_private_allows_rfc1918_only(self):
+        p = egress.EgressPolicy(block_private=False)
+        # RFC1918 now allowed...
+        self.assertFalse(egress.is_internal_ip("172.24.0.8", policy=p))
+        allowed, pinned, _ = egress.check_egress("172.24.0.8", policy=p)
+        self.assertTrue(allowed)
+        self.assertEqual(pinned, "172.24.0.8")
+        # ...but loopback / link-local stay blocked by their own checks.
+        self.assertTrue(egress.is_internal_ip("127.0.0.1", policy=p))
+        self.assertTrue(egress.is_internal_ip("169.254.169.254", policy=p))
+
+    def test_extra_blocked_enforced_even_when_private_relaxed(self):
+        # The explicit denylist (RedAmon service IPs) is never policy-gated.
+        p = egress.EgressPolicy(block_private=False)
+        self.assertTrue(egress.is_internal_ip("172.24.0.9", extra_blocked=["172.24.0.9"], policy=p))
+
+    def test_policy_from_env_defaults_block(self):
+        self.assertEqual(egress.policy_from_env({}), egress.DEFAULT_POLICY)
+        p = egress.policy_from_env({"CAPTURE_EGRESS_BLOCK_PRIVATE": "false"})
+        self.assertFalse(p.block_private)
+        self.assertTrue(p.block_loopback)  # unrelated checks stay on
+        # Only explicit false-like values relax a check; a typo keeps it blocking.
+        self.assertTrue(egress.policy_from_env({"CAPTURE_EGRESS_BLOCK_PRIVATE": "flase"}).block_private)
+
 
 class TestHeaders(unittest.TestCase):
     def test_normalize_lowercases_and_collapses_duplicates(self):

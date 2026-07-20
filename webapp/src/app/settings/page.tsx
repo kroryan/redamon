@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Plus, Pencil, Trash2, Loader2, Eye, EyeOff, Upload, Download, Swords, RotateCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Info, BookOpen, Server } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
+import { useAuth } from '@/providers/AuthProvider'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { LlmProviderForm } from '@/components/settings/LlmProviderForm'
 import McpServersTab from '@/components/settings/mcp/McpServersTab'
@@ -12,7 +13,7 @@ import { TradecraftResourceForm } from '@/components/settings/TradecraftResource
 import { TradecraftResourceList } from '@/components/settings/TradecraftResourceList'
 import { PROVIDER_TYPES } from '@/lib/llmProviderPresets'
 import { Modal } from '@/components/ui/Modal/Modal'
-import { useAlertModal, useToast, WikiInfoButton, Toggle } from '@/components/ui'
+import { useAlertModal, useToast, WikiInfoButton, Toggle, Tooltip } from '@/components/ui'
 import { TrafficMindProjectMatrix } from '@/components/traffic/TrafficMindProjectMatrix'
 import styles from '@/components/settings/Settings.module.css'
 import { buildTemplate, templateToJson, validateAndParse, isValidationError } from '@/lib/apiKeysTemplate'
@@ -56,6 +57,17 @@ interface UserSettings {
   captureProxyRetentionDays: number
   captureProxyRedactSecrets: boolean
   captureProxyPassiveDetect: boolean
+  captureEgressBlockEmptyHost: boolean
+  captureEgressBlockHardGuardrail: boolean
+  captureEgressFailClosed: boolean
+  captureEgressBlockUnresolvable: boolean
+  captureEgressBlockPrivate: boolean
+  captureEgressBlockLoopback: boolean
+  captureEgressBlockLinkLocal: boolean
+  captureEgressBlockCgnat: boolean
+  captureEgressBlockReserved: boolean
+  captureEgressBlockMulticast: boolean
+  captureEgressBlockUnspecified: boolean
 }
 
 const EMPTY_SETTINGS: UserSettings = {
@@ -96,7 +108,54 @@ const EMPTY_SETTINGS: UserSettings = {
   captureProxyRetentionDays: 14,
   captureProxyRedactSecrets: true,
   captureProxyPassiveDetect: true,
+  captureEgressBlockEmptyHost: true,
+  captureEgressBlockHardGuardrail: true,
+  captureEgressFailClosed: true,
+  captureEgressBlockUnresolvable: true,
+  captureEgressBlockPrivate: true,
+  captureEgressBlockLoopback: true,
+  captureEgressBlockLinkLocal: true,
+  captureEgressBlockCgnat: true,
+  captureEgressBlockReserved: true,
+  captureEgressBlockMulticast: true,
+  captureEgressBlockUnspecified: true,
 }
+
+// Capture-proxy egress-guard toggles for the TrafficMind settings section. Each
+// maps to a boolean UserSettings field (all default true = block) and, at proxy
+// spawn, to a CAPTURE_EGRESS_* env the mitmproxy addon reads. Titles + tooltips
+// explain exactly what each condition refuses. `danger` flags the two with a
+// real security cost when relaxed.
+type EgressToggleKey =
+  | 'captureEgressBlockEmptyHost' | 'captureEgressBlockHardGuardrail' | 'captureEgressFailClosed'
+  | 'captureEgressBlockUnresolvable' | 'captureEgressBlockPrivate' | 'captureEgressBlockLoopback'
+  | 'captureEgressBlockLinkLocal' | 'captureEgressBlockCgnat' | 'captureEgressBlockReserved'
+  | 'captureEgressBlockMulticast' | 'captureEgressBlockUnspecified'
+
+const EGRESS_TOGGLES: { key: EgressToggleKey; title: string; tip: string; danger?: boolean }[] = [
+  { key: 'captureEgressBlockPrivate', title: 'Private IPs (RFC1918)', danger: true,
+    tip: 'Refuse 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 and IPv6 ULA (fc00::/7). Turn OFF to let the proxy reach internal / lab targets on a private network (e.g. Docker 172.x). WARNING: this also exposes RedAmon’s own services on those ranges; keep their IPs in the always-on blocked-IPs denylist (CAPTURE_BLOCKED_IPS) so they stay refused.' },
+  { key: 'captureEgressBlockLinkLocal', title: 'Link-local IPs',
+    tip: 'Refuse 169.254.0.0/16 and fe80::/10. Includes the cloud metadata endpoint 169.254.169.254, a classic SSRF credential-theft target. Leave on unless you specifically need it.' },
+  { key: 'captureEgressBlockLoopback', title: 'Loopback IPs',
+    tip: 'Refuse 127.0.0.0/8 and ::1 (the proxy host itself). Prevents the proxy being used to reach services bound to localhost inside its own container.' },
+  { key: 'captureEgressBlockCgnat', title: 'CGNAT (100.64/10)',
+    tip: 'Refuse 100.64.0.0/10, the carrier-grade NAT shared address space.' },
+  { key: 'captureEgressBlockReserved', title: 'Reserved ranges',
+    tip: 'Refuse IANA-reserved address ranges (e.g. 240.0.0.0/4 and other non-routable reserved blocks).' },
+  { key: 'captureEgressBlockMulticast', title: 'Multicast',
+    tip: 'Refuse 224.0.0.0/4 and ff00::/8 multicast destinations.' },
+  { key: 'captureEgressBlockUnspecified', title: 'Unspecified (0.0.0.0 / ::)',
+    tip: 'Refuse the unspecified addresses 0.0.0.0 and :: .' },
+  { key: 'captureEgressBlockHardGuardrail', title: 'Sensitive hostnames',
+    tip: 'Refuse .gov / .mil / .edu / .int domains and the built-in hard-guardrail denylist. Stops the proxy reaching protected / government hosts.' },
+  { key: 'captureEgressBlockUnresolvable', title: 'Unresolvable hosts',
+    tip: 'Refuse hosts that do not resolve in DNS or have an invalid IDNA label. Structural: with no IP there is nothing to connect to, so these are never forwarded regardless of this toggle.' },
+  { key: 'captureEgressBlockEmptyHost', title: 'Empty host',
+    tip: 'Refuse requests with no Host. Structural: there is no target to forward to, so these are never sent regardless of this toggle.' },
+  { key: 'captureEgressFailClosed', title: 'Fail closed on guard error', danger: true,
+    tip: 'If the egress guard itself throws an error, refuse the request (fail closed, safe). Turning this OFF makes it FAIL-OPEN: the request is forwarded WITHOUT vetting or IP pinning. Dangerous; leave on.' },
+]
 
 interface RotationInfo {
   extraKeyCount: number
@@ -137,6 +196,7 @@ function getProviderLabel(providerType: string): string {
 
 export default function SettingsPage() {
   const { userId } = useProject()
+  const { isAdmin } = useAuth()
   const { alertError, alert: showAlert, confirm: showConfirm } = useAlertModal()
   const toast = useToast()
 
@@ -567,6 +627,17 @@ export default function SettingsPage() {
           captureProxyRetentionDays: data.captureProxyRetentionDays ?? 14,
           captureProxyRedactSecrets: data.captureProxyRedactSecrets ?? true,
           captureProxyPassiveDetect: data.captureProxyPassiveDetect ?? true,
+          captureEgressBlockEmptyHost: data.captureEgressBlockEmptyHost ?? true,
+          captureEgressBlockHardGuardrail: data.captureEgressBlockHardGuardrail ?? true,
+          captureEgressFailClosed: data.captureEgressFailClosed ?? true,
+          captureEgressBlockUnresolvable: data.captureEgressBlockUnresolvable ?? true,
+          captureEgressBlockPrivate: data.captureEgressBlockPrivate ?? true,
+          captureEgressBlockLoopback: data.captureEgressBlockLoopback ?? true,
+          captureEgressBlockLinkLocal: data.captureEgressBlockLinkLocal ?? true,
+          captureEgressBlockCgnat: data.captureEgressBlockCgnat ?? true,
+          captureEgressBlockReserved: data.captureEgressBlockReserved ?? true,
+          captureEgressBlockMulticast: data.captureEgressBlockMulticast ?? true,
+          captureEgressBlockUnspecified: data.captureEgressBlockUnspecified ?? true,
         })
         if (data.rotationConfigs) {
           setRotationConfigs(data.rotationConfigs)
@@ -668,6 +739,17 @@ export default function SettingsPage() {
           captureProxyRetentionDays: data.captureProxyRetentionDays ?? 14,
           captureProxyRedactSecrets: data.captureProxyRedactSecrets ?? true,
           captureProxyPassiveDetect: data.captureProxyPassiveDetect ?? true,
+          captureEgressBlockEmptyHost: data.captureEgressBlockEmptyHost ?? true,
+          captureEgressBlockHardGuardrail: data.captureEgressBlockHardGuardrail ?? true,
+          captureEgressFailClosed: data.captureEgressFailClosed ?? true,
+          captureEgressBlockUnresolvable: data.captureEgressBlockUnresolvable ?? true,
+          captureEgressBlockPrivate: data.captureEgressBlockPrivate ?? true,
+          captureEgressBlockLoopback: data.captureEgressBlockLoopback ?? true,
+          captureEgressBlockLinkLocal: data.captureEgressBlockLinkLocal ?? true,
+          captureEgressBlockCgnat: data.captureEgressBlockCgnat ?? true,
+          captureEgressBlockReserved: data.captureEgressBlockReserved ?? true,
+          captureEgressBlockMulticast: data.captureEgressBlockMulticast ?? true,
+          captureEgressBlockUnspecified: data.captureEgressBlockUnspecified ?? true,
         })
         if (data.rotationConfigs) {
           setRotationConfigs(data.rotationConfigs)
@@ -1640,6 +1722,7 @@ export default function SettingsPage() {
       {activeTab === 'system' && (
         <>
           <SystemSection />
+          {isAdmin && (
           <div style={{
             background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
             borderRadius: 'var(--radius-md, 8px)', padding: '20px', marginBottom: '20px',
@@ -1648,12 +1731,20 @@ export default function SettingsPage() {
               <div>
                 <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 'var(--text-lg, 16px)', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                   TrafficMind
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', border: '1px solid var(--border-default)', borderRadius: 4, padding: '1px 6px' }}>admin only</span>
                   <WikiInfoButton target="https://github.com/samugit83/redamon/wiki/TrafficMind" title="Open TrafficMind wiki page" />
                 </h3>
                 <p style={{ margin: '4px 0 0', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm, 13px)' }}>
                   Master switch for the TrafficMind capture proxy. Enabling starts the proxy + ingest containers;
                   disabling stops them. Turn capture on/off per project in the matrix below, or from the toggle on
                   the TrafficMind page.
+                </p>
+                <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm, 13px)' }}>
+                  <strong style={{ color: 'var(--text-secondary)' }}>Global settings.</strong> There is a single
+                  shared capture proxy, so the master switch, container config, and egress guard below apply to{' '}
+                  <strong>every user and every project</strong>. A change here is propagated to all of them, and the
+                  last save wins. Only administrators can edit them. (The one exception is the per-project routing
+                  matrix at the bottom, which is per-project.)
                 </p>
               </div>
               <Toggle
@@ -1707,8 +1798,41 @@ export default function SettingsPage() {
               </div>
             )}
 
+            {settings.captureProxyEnabled && (
+              <div style={{ marginTop: 18, borderTop: '1px solid var(--border-default)', paddingTop: 16 }}>
+                <h4 style={{ margin: '0 0 4px', color: 'var(--text-primary)', fontSize: 'var(--text-md, 14px)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  Egress guard
+                  <Tooltip content="The egress guard stops the capture proxy becoming an SSRF pivot into RedAmon's internal network. Each condition below is REFUSED (returns 403, nothing forwarded). All default to block; relaxing one lets the proxy reach that class of destination. RedAmon's own service IPs stay blocked via the separate blocked-IPs denylist regardless." position="top" maxWidth={520}>
+                    <Info size={14} style={{ color: 'var(--text-tertiary)', cursor: 'help' }} />
+                  </Tooltip>
+                </h4>
+                <p style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm, 13px)' }}>
+                  Which destinations the proxy refuses. Every toggle is <strong>block</strong> by default; turn one off only to deliberately allow that class (e.g. private IPs to reach an internal / lab target on a private Docker network).
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12 }}>
+                  {EGRESS_TOGGLES.map((t) => (
+                    <div key={t.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, color: 'var(--text-secondary)', fontSize: 13 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <span>{t.title}</span>
+                        {t.danger && <span title="Relaxing this has a real security cost" style={{ color: 'var(--danger, #e5484d)', fontSize: 12, lineHeight: 1 }}>⚠</span>}
+                        <Tooltip content={t.tip} position="top" maxWidth={480}>
+                          <Info size={13} style={{ color: 'var(--text-tertiary)', cursor: 'help' }} />
+                        </Tooltip>
+                      </span>
+                      <Toggle
+                        checked={settings[t.key]}
+                        onChange={(v) => { updateSetting(t.key, v); setSettingsDirty(true) }}
+                        aria-label={t.title}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {settings.captureProxyEnabled && <TrafficMindProjectMatrix />}
           </div>
+          )}
         </>
       )}
 
