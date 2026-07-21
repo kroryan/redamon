@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.1] - 2026-07-21
+
+### Added
+
+- **Granular per-family body storage for TrafficMind.** Each captured body is now routed by content-type family (text, JSON, script, image, font, video, audio, document, archive, binary) to one of four policies: `auto` (size-based), `inline` (database column), `disk` (offloaded blob), or `meta` (drop the bytes, keep only size + sha256). A new **Max store (MB)** ceiling drops oversized bodies to metadata regardless of policy, and request vs response bodies can be kept independently. The shipped **Recommended** preset keeps text / JSON / scripts, drops media noise (images, fonts, video, audio) as `meta`, and offloads leak-worthy downloads (documents, archives, binaries) to disk. Fonts and images mislabeled as `application/octet-stream` are reclassified by filename extension.
+
+### Changed
+
+- **TrafficMind settings moved to the TrafficMind page.** The admin-only settings now open from a **Settings** button on the `/traffic` toolbar in a scrollable modal, instead of the System section of Global Settings. Every control saves automatically the moment you change it (number fields when you click away), persisting only the changed field.
+
+### Fixed
+
+- **A malformed numeric capture env no longer kills capture.** `CAPTURE_MAX_STORE_MB` / `CAPTURE_PROXY_MAX_BODY_KB` now fall back to their defaults instead of crash-loading the proxy addon, which previously stopped all capture silently.
+
+---
+
 ## [6.1.0] - 2026-07-19
 
 ### Added

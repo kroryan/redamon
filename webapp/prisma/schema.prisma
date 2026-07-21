@@ -140,6 +140,13 @@ model UserSettings {
   captureProxyRetentionDays Int     @default(14)    @map("capture_proxy_retention_days")
   captureProxyRedactSecrets Boolean @default(true)  @map("capture_proxy_redact_secrets")
   captureProxyPassiveDetect Boolean @default(true)  @map("capture_proxy_passive_detect")
+  // Granular body-storage policy (Global Settings > TrafficMind > Body storage).
+  // storeReqBodies/storeRespBodies gate direction; maxStoreMb is a hard drop
+  // ceiling (0 = unlimited); bodyRules is a family->policy map (auto|inline|disk|meta).
+  captureProxyStoreReqBodies  Boolean @default(true) @map("capture_proxy_store_req_bodies")
+  captureProxyStoreRespBodies Boolean @default(true) @map("capture_proxy_store_resp_bodies")
+  captureProxyMaxStoreMb      Int     @default(5)    @map("capture_proxy_max_store_mb")
+  captureProxyBodyRules       Json    @default("{}") @map("capture_proxy_body_rules")
 
   // Capture-proxy EGRESS GUARD toggles (Global Settings > TrafficMind). The guard
   // stops the proxy becoming an SSRF pivot; each block condition is individually

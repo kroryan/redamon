@@ -199,6 +199,23 @@
 .pageBtn:disabled { opacity: 0.4; cursor: default; }
 .pageInfo { font-size: var(--text-sm); color: var(--text-tertiary); }
 
+/* Distinct admin "Settings" button on the toolbar (accent, icon + text). */
+.settingsBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-subtle, var(--bg-tertiary));
+  border: 1px solid var(--accent, var(--border-strong, var(--border-default)));
+  border-radius: var(--radius-sm);
+  color: var(--accent, var(--text-primary));
+  padding: 5px 12px;
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium, 500);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.settingsBtn:hover { background: var(--bg-hover); }
+
 /* States */
 .empty, .loading {
   padding: var(--space-8);

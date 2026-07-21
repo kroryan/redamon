@@ -35,6 +35,13 @@ class CaptureProxyConfig(BaseModel):
     redactSecrets: Optional[bool] = None
     scope: Optional[str] = None
     blockedIps: Optional[str] = None
+    # Granular body-storage policy (Global Settings > TrafficMind > Body storage).
+    # storeReqBodies/storeRespBodies gate direction; maxStoreMb is a hard drop
+    # ceiling; bodyRules is a JSON family->policy map (auto|inline|disk|meta).
+    storeReqBodies: Optional[bool] = None
+    storeRespBodies: Optional[bool] = None
+    maxStoreMb: Optional[int] = None
+    bodyRules: Optional[str] = None
     # Egress-guard toggles (Global Settings > TrafficMind). Each defaults to block
     # (True) both here and in the proxy, so omitting any keeps the always-on guard.
     egressBlockEmptyHost: Optional[bool] = None

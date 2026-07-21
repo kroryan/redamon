@@ -337,13 +337,33 @@ Assemble the record, decide inline vs offload per body, compute passive signals,
 enqueue. Wrapped in a blanket exception handler that logs but never breaks the
 proxy path.
 
-**Body policy** ([`capture_lib.py:101`](../capture_proxy/capture_lib.py#L101)):
+**Body policy** ([`capture_lib.py:101`](../capture_proxy/capture_lib.py#L101)). Each
+body is routed to exactly one destination: **inline** (Postgres column, agent +
+human readable), **disk** (offload to `/bodies/<sha256>`, human/UI readable only),
+or **meta** (drop bytes, keep only size + sha256). The routing is a per
+content-type **family** policy, not a flat text/binary split:
 
-- `store_bodies` off, or empty body: keep only size + sha256.
-- Binary content: always offload to `/bodies/<sha256>`.
-- Text and size <= cap (`CAPTURE_PROXY_MAX_BODY_KB`, default 64 KB): inline.
-- Otherwise: offload. Offload is content-addressed, so identical bodies dedup by
-  sha256.
+1. Master `store_bodies` off, empty body, or a per-direction toggle
+   (`CAPTURE_STORE_REQ_BODIES` / `CAPTURE_STORE_RESP_BODIES`) off -> **meta**.
+2. `classify_family` maps the `Content-Type` (with a URL filename-extension
+   fallback that rescues octet-stream-mislabeled files, e.g. a `.woff2` served as
+   `application/octet-stream`) to one of: `text json script image font video
+   audio document archive binary other`.
+3. The family's **policy** (`CAPTURE_BODY_RULES`, a JSON `family->policy` map
+   merged over the shipped **Recommended** defaults) decides:
+   - `auto` -> size-based: text-like family and size <= inline cap
+     (`CAPTURE_PROXY_MAX_BODY_KB`, default 64 KB) -> **inline**, else **disk**.
+   - `inline` -> force DB (falls back to disk over the inline cap).
+   - `disk` -> always offload.
+   - `meta` -> drop bytes, keep size + sha256.
+4. A hard ceiling `CAPTURE_MAX_STORE_MB` (default 5 MB, 0 = unlimited) overrides
+   `disk`/`inline` to **meta** for any oversized body.
+
+Recommended defaults: text/json/script `auto`; image/font/video/audio `meta`
+(render noise dropped); document/archive/binary `disk` (leak-worthy downloads
+kept). Offload is content-addressed, so identical bodies dedup by sha256. The
+`CAPTURE_PROXY_MAX_BODY_KB` cap is a DB-vs-disk **routing** threshold, never a
+size limit — the only knob that *drops* by size is `CAPTURE_MAX_STORE_MB`.
 
 **Passive signals**, computed for free on every response
 ([`capture_lib.py:85`](../capture_proxy/capture_lib.py#L85)): `hadAuth`,
@@ -668,8 +688,12 @@ ones are pushed to the orchestrator on the settings save.
 | `captureProxyEnabled` | Project | false | per-project routing gate |
 | `captureProxyScope` | UserSettings | `both` | which producers route (recon\|agent\|both) |
 | `captureProxyPort` | UserSettings | 8888 | proxy listen + publish port |
-| `captureProxyStoreBodies` | UserSettings | true | store bodies at all |
-| `captureProxyMaxBodyKb` | UserSettings | 64 | inline body size cap |
+| `captureProxyStoreBodies` | UserSettings | true | master switch: store bodies at all |
+| `captureProxyStoreReqBodies` | UserSettings | true | store request bodies (direction gate) |
+| `captureProxyStoreRespBodies` | UserSettings | true | store response bodies (direction gate) |
+| `captureProxyMaxBodyKb` | UserSettings | 64 | inline (DB-vs-disk) text routing threshold |
+| `captureProxyMaxStoreMb` | UserSettings | 5 | hard drop ceiling in MB (0 = unlimited) |
+| `captureProxyBodyRules` | UserSettings | `{}` | per-family policy map (auto\|inline\|disk\|meta); `{}` = Recommended defaults |
 | `captureProxyRedactSecrets` | UserSettings | true | redact sensitive headers |
 | `captureProxyPassiveDetect` | UserSettings | true | compute passive signals |
 | `captureProxyRetentionDays` | UserSettings | 14 | maintenance retention (`<= 0` = forever) |
@@ -695,8 +719,12 @@ The eleven `captureEgress*` fields are pushed to the orchestrator on save (as th
 |---|---|---|---|
 | `CAPTURE_PROXY_ENABLED` | false | producers | routing gate (derived from `Project.captureProxyEnabled`) |
 | `CAPTURE_PROXY_IMAGE` | `redamon-capture-proxy:latest` | orchestrator | image (trusted env only) |
-| `CAPTURE_PROXY_MAX_BODY_KB` | 64 | proxy | inline body size cap |
-| `CAPTURE_PROXY_STORE_BODIES` | true | proxy | store bodies at all |
+| `CAPTURE_PROXY_MAX_BODY_KB` | 64 | proxy | inline (DB-vs-disk) text routing threshold |
+| `CAPTURE_PROXY_STORE_BODIES` | true | proxy | master switch: store bodies at all |
+| `CAPTURE_STORE_REQ_BODIES` | true | proxy | store request bodies (direction gate) |
+| `CAPTURE_STORE_RESP_BODIES` | true | proxy | store response bodies (direction gate) |
+| `CAPTURE_MAX_STORE_MB` | 5 | proxy | hard drop ceiling in MB (0 = unlimited) |
+| `CAPTURE_BODY_RULES` | (empty) | proxy | JSON family->policy map; empty = Recommended defaults |
 | `CAPTURE_PROXY_REDACT_SECRETS` | true | ingest | redact sensitive headers |
 | `CAPTURE_REDACT_SALT` | `redamon-capture` | ingest | salt for redaction hash |
 | `CAPTURE_BLOCKED_IPS` | (empty) | proxy | extra egress denylist (**always enforced**, never policy-gated) |

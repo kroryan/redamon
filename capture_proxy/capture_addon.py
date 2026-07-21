@@ -36,7 +36,10 @@ from datetime import datetime, timezone
 
 from mitmproxy import http
 
-from capture_lib import build_record, decide_body, normalize_headers, sha256_hex
+from capture_lib import (
+    build_record, classify_family, decide_body, normalize_headers,
+    parse_body_rules, sha256_hex,
+)
 from egress import check_egress, policy_from_env
 
 try:
@@ -51,14 +54,18 @@ def _hard_blocked(host: str) -> bool:
     return blocked
 
 
-TEXT_CT_MARKERS = ("text", "json", "xml", "javascript", "html", "csv", "x-www-form-urlencoded")
-
-
-def _is_text(content_type) -> bool:
-    if not content_type:
-        return True  # unknown -> treat as text (bounded by the size cap anyway)
-    ct = str(content_type).lower()
-    return any(m in ct for m in TEXT_CT_MARKERS)
+def _num_env(name: str, default, cast):
+    """Parse a numeric env var, falling back to `default` on missing/empty/garbage.
+    Kept fail-safe because this runs in RedamonCapture.__init__, which is OUTSIDE
+    the response-hook exception guard: a bad value here would crash-load the addon
+    and silently kill all capture."""
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return cast(raw)
+    except (ValueError, TypeError):
+        return default
 
 
 class RedamonCapture:
@@ -67,8 +74,18 @@ class RedamonCapture:
     def __init__(self) -> None:
         self.spool_dir = os.environ.get("CAPTURE_SPOOL_DIR", "/spool")
         self.bodies_dir = os.environ.get("CAPTURE_BODIES_DIR", "/bodies")
-        self.max_body_bytes = int(os.environ.get("CAPTURE_PROXY_MAX_BODY_KB", "64") or "64") * 1024
+        self.max_body_bytes = _num_env("CAPTURE_PROXY_MAX_BODY_KB", 64, int) * 1024
         self.store_bodies = os.environ.get("CAPTURE_PROXY_STORE_BODIES", "true").lower() != "false"
+        # Granular body-storage policy. `store_bodies` is the master switch; the
+        # two direction toggles gate request vs response independently; the family
+        # rules + max-store ceiling decide inline/disk/meta per body (capture_lib).
+        self.store_req_bodies = os.environ.get("CAPTURE_STORE_REQ_BODIES", "true").lower() != "false"
+        self.store_resp_bodies = os.environ.get("CAPTURE_STORE_RESP_BODIES", "true").lower() != "false"
+        _max_store_mb = _num_env("CAPTURE_MAX_STORE_MB", 5.0, float)
+        self.max_store_bytes = int(_max_store_mb * 1024 * 1024) if _max_store_mb > 0 else 0
+        self.body_rules = parse_body_rules(os.environ.get("CAPTURE_BODY_RULES", ""))
+        print(f"[capture] body rules={self.body_rules} max_store_bytes={self.max_store_bytes} "
+              f"store_req={self.store_req_bodies} store_resp={self.store_resp_bodies}", flush=True)
         self.extra_blocked_ips = [ip for ip in os.environ.get("CAPTURE_BLOCKED_IPS", "").split(",") if ip.strip()]
         # Egress-guard policy from CAPTURE_EGRESS_* env (every check defaults to
         # block, so an unset/typo'd var can never relax the guard). Surfaced in
@@ -173,10 +190,18 @@ class RedamonCapture:
         req_raw = req.raw_content if req and req.raw_content else None
         resp_raw = resp.raw_content if resp and resp.raw_content else None
 
+        # Classify each body into a storage family (content-type, with a URL
+        # filename-extension fallback that rescues octet-stream-mislabeled files).
+        req_family = classify_family(req_headers.get("content-type"), path=req.path)
+        resp_family = classify_family(resp_headers.get("content-type"), path=req.path)
         rb_inline, rb_ref, rb_size, rb_sha = decide_body(
-            req_raw, self.max_body_bytes, self.store_bodies, _is_text(req_headers.get("content-type")))
+            req_raw, family=req_family, rules=self.body_rules,
+            inline_cap_bytes=self.max_body_bytes, max_store_bytes=self.max_store_bytes,
+            store=self.store_bodies and self.store_req_bodies)
         sb_inline, sb_ref, sb_size, sb_sha = decide_body(
-            resp_raw, self.max_body_bytes, self.store_bodies, _is_text(resp_headers.get("content-type")))
+            resp_raw, family=resp_family, rules=self.body_rules,
+            inline_cap_bytes=self.max_body_bytes, max_store_bytes=self.max_store_bytes,
+            store=self.store_bodies and self.store_resp_bodies)
 
         # Offload bodies to the content-addressed store (dedup by sha).
         if rb_ref and req_raw is not None:

@@ -8,6 +8,7 @@ adapts a live flow into these plain inputs.
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 SECURITY_HEADERS = (
@@ -98,29 +99,158 @@ def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def decide_body(raw: Optional[bytes], max_inline_bytes: int, store_bodies: bool,
-                is_text: bool) -> Tuple[Optional[str], Optional[str], int, Optional[str]]:
-    """
-    Decide inline vs offload for one body.
+# ── Body-storage policy ─────────────────────────────────────────────────────
+# Each captured body is routed to exactly ONE destination:
+#   inline -> stored in the Postgres column   (agent + human readable, fast)
+#   disk   -> full bytes offloaded to /bodies  (human/UI readable only)
+#   meta   -> bytes dropped, only size + sha256 kept
+# The operator maps each content-type FAMILY to a POLICY in {auto,inline,disk,meta}.
+# `auto` reproduces size-based routing: small text -> DB, everything else -> disk.
 
-    Returns (inline_text, body_ref_sha, size, sha). Rules (plan §6.2):
-      - store_bodies off -> nothing stored (only size + sha kept)
-      - binary content -> always offload
-      - size <= cap and text -> inline
-      - otherwise -> offload (ref = sha, caller writes bodies/<sha>)
+VALID_POLICIES = frozenset({"auto", "inline", "disk", "meta"})
+
+# Families whose `auto` policy is size-based-text (small -> inline). Everything
+# else under `auto` always offloads: binary is never inlined into the DB column.
+_TEXT_FAMILIES = frozenset({"text", "json", "script", "other"})
+
+# Recommended default policy map (shipped default): keep useful text/data, drop
+# render-noise media, keep leak-worthy downloads to disk. Operator JSON merges
+# OVER this. Every classifiable family MUST appear here so it is a valid key.
+DEFAULT_BODY_RULES: Dict[str, str] = {
+    "text": "auto",       # html / css / xml / csv / plain
+    "json": "auto",       # json / form-urlencoded / graphql  (the juicy API data)
+    "script": "auto",     # javascript / ecmascript
+    "image": "meta",      # render noise
+    "font": "meta",       # render noise
+    "video": "meta",      # render noise
+    "audio": "meta",      # render noise
+    "document": "disk",   # pdf / office / rtf  (leak evidence; agent can't read, human can)
+    "archive": "disk",    # zip / gz / tar / 7z  (source / backup disclosure)
+    "binary": "disk",     # octet-stream / wasm / serialized  (deserialization, downloads)
+    "other": "auto",      # unknown -> treat as small text
+}
+
+# Content-type substring -> family (checked in order; first hit wins). "binary"
+# is last among application/* so real files (font/image/... mislabeled as
+# octet-stream) get a chance to be reclassified by extension below.
+_CT_FAMILY = (
+    ("font", ("font/", "application/font", "application/vnd.ms-fontobject", "x-font")),
+    ("image", ("image/",)),
+    ("video", ("video/",)),
+    ("audio", ("audio/",)),
+    ("document", ("application/pdf", "application/msword", "officedocument",
+                  "application/vnd.ms-excel", "application/vnd.ms-powerpoint",
+                  "application/rtf", "text/rtf", "application/vnd.oasis")),
+    ("archive", ("application/zip", "application/gzip", "application/x-gzip",
+                 "application/x-tar", "application/x-7z", "application/x-rar",
+                 "application/x-bzip", "application/x-xz", "application/x-compress")),
+    ("script", ("javascript", "ecmascript")),
+    ("json", ("json", "x-www-form-urlencoded", "graphql")),
+    ("text", ("text/", "xml", "html", "csv")),
+    ("binary", ("application/octet-stream", "application/wasm",
+                "application/x-protobuf", "java-serialized", "x-msgpack",
+                "application/x-binary")),
+)
+
+# Filename-extension -> family fallback, for servers that mislabel content
+# (e.g. a .woff2 served as application/octet-stream, seen in the wild).
+_EXT_FAMILY: Dict[str, str] = {
+    "woff": "font", "woff2": "font", "ttf": "font", "otf": "font", "eot": "font",
+    "png": "image", "jpg": "image", "jpeg": "image", "gif": "image", "webp": "image",
+    "bmp": "image", "ico": "image", "avif": "image", "svg": "image", "tif": "image", "tiff": "image",
+    "mp4": "video", "webm": "video", "mov": "video", "avi": "video", "mkv": "video", "m4v": "video",
+    "mp3": "audio", "wav": "audio", "ogg": "audio", "flac": "audio", "m4a": "audio", "aac": "audio",
+    "pdf": "document", "doc": "document", "docx": "document", "xls": "document", "xlsx": "document",
+    "ppt": "document", "pptx": "document", "rtf": "document", "odt": "document", "ods": "document",
+    "zip": "archive", "gz": "archive", "tgz": "archive", "tar": "archive", "7z": "archive",
+    "rar": "archive", "bz2": "archive", "xz": "archive",
+    "js": "script", "mjs": "script", "json": "json",
+    "html": "text", "htm": "text", "css": "text", "txt": "text", "xml": "text", "csv": "text",
+    "wasm": "binary", "bin": "binary", "exe": "binary", "dll": "binary", "so": "binary", "dat": "binary",
+}
+
+
+def _ext_family(path) -> Optional[str]:
+    """Family from a URL path's filename extension, or None."""
+    p = str(path or "").split("?", 1)[0].split("#", 1)[0]
+    dot = p.rfind(".")
+    if dot == -1 or dot < p.rfind("/"):
+        return None
+    return _EXT_FAMILY.get(p[dot + 1:].lower())
+
+
+def classify_family(content_type, path=None) -> str:
+    """Classify a body into a storage family from its Content-Type, falling back
+    to the URL's filename extension (which rescues octet-stream-mislabeled files)."""
+    ct = str(content_type or "").lower().split(";", 1)[0].strip()
+    for family, markers in _CT_FAMILY:
+        if any(m in ct for m in markers):
+            if family == "binary":
+                # octet-stream & friends are a catch-all; trust the extension if
+                # it names a concrete kind (the woff2-as-octet-stream case).
+                ext_fam = _ext_family(path)
+                if ext_fam:
+                    return ext_fam
+            return family
+    # No content-type signal: fall back to the extension, else "other".
+    return _ext_family(path) or "other"
+
+
+def parse_body_rules(raw) -> Dict[str, str]:
+    """Merge an operator override (JSON string or dict of family->policy) OVER the
+    Recommended defaults. Unknown families / invalid policies are ignored so a bad
+    value can never produce an invalid rule (fail safe)."""
+    rules = dict(DEFAULT_BODY_RULES)
+    if not raw:
+        return rules
+    try:
+        override = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except (ValueError, TypeError):
+        return rules
+    if not isinstance(override, dict):
+        return rules
+    for fam, pol in override.items():
+        fam, pol = str(fam).lower(), str(pol).lower()
+        if fam in DEFAULT_BODY_RULES and pol in VALID_POLICIES:
+            rules[fam] = pol
+    return rules
+
+
+def decide_body(raw: Optional[bytes], *, family: str, rules: Dict[str, str],
+                inline_cap_bytes: int, max_store_bytes: int,
+                store: bool) -> Tuple[Optional[str], Optional[str], int, Optional[str]]:
+    """
+    Route one body to inline (DB) / offload (disk) / metadata-only.
+
+    Returns (inline_text, body_ref_sha, size, sha):
+      - store off or empty body            -> metadata only
+      - family policy 'meta'               -> metadata only
+      - size > max_store_bytes (if capped) -> metadata only (hard ceiling)
+      - policy 'disk'                      -> offload
+      - policy 'inline'                    -> DB if <= inline cap, else offload
+      - policy 'auto'                      -> DB if text-family and <= cap, else offload
+    `max_store_bytes <= 0` means no ceiling. Offloaded bodies dedup by sha.
     """
     if raw is None:
         return (None, None, 0, None)
     size = len(raw)
     sha = sha256_hex(raw) if size else None
-    if not store_bodies or size == 0:
+    if not store or size == 0:
         return (None, None, size, sha)
-    if is_text and size <= max_inline_bytes:
-        try:
+    policy = rules.get(family, "auto")
+    if policy == "meta":
+        return (None, None, size, sha)
+    if max_store_bytes > 0 and size > max_store_bytes:
+        return (None, None, size, sha)
+    if policy == "disk":
+        return (None, sha, size, sha)
+    if policy == "inline":
+        if size <= inline_cap_bytes:
             return (raw.decode("utf-8", errors="replace"), None, size, sha)
-        except Exception:
-            pass
-    # offload
+        return (None, sha, size, sha)
+    # auto
+    if family in _TEXT_FAMILIES and size <= inline_cap_bytes:
+        return (raw.decode("utf-8", errors="replace"), None, size, sha)
     return (None, sha, size, sha)
 
 

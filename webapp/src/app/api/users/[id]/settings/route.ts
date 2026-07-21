@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession, isInternalRequest, isScannerRequest, requireUserAccess } from '@/lib/session'
 import { orchestratorFetch } from '@/lib/orchestrator'
+import { sanitizeBodyRules } from '@/lib/captureBodyRules'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -91,6 +92,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         captureProxyRetentionDays: 14,
         captureProxyRedactSecrets: true,
         captureProxyPassiveDetect: true,
+        captureProxyStoreReqBodies: true,
+        captureProxyStoreRespBodies: true,
+        captureProxyMaxStoreMb: 5,
+        captureProxyBodyRules: {},
         captureEgressBlockEmptyHost: true,
         captureEgressBlockHardGuardrail: true,
         captureEgressFailClosed: true,
@@ -207,18 +212,22 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     // HTTP Traffic Capture (Phase 1) global config. Booleans/ints, so — like
     // tunnelsEnabled — they cannot ride the string `data` loop above.
     const captureBoolFields = ['captureProxyStoreBodies', 'captureProxyRedactSecrets', 'captureProxyPassiveDetect',
+      // Granular body-storage direction toggles (Body storage sub-panel).
+      'captureProxyStoreReqBodies', 'captureProxyStoreRespBodies',
       // Egress-guard toggles (Global Settings > TrafficMind). All default true (block).
       'captureEgressBlockEmptyHost', 'captureEgressBlockHardGuardrail', 'captureEgressFailClosed',
       'captureEgressBlockUnresolvable', 'captureEgressBlockPrivate', 'captureEgressBlockLoopback',
       'captureEgressBlockLinkLocal', 'captureEgressBlockCgnat', 'captureEgressBlockReserved',
       'captureEgressBlockMulticast', 'captureEgressBlockUnspecified'] as const
-    const captureIntFields = ['captureProxyPort', 'captureProxyMaxBodyKb', 'captureProxyRetentionDays'] as const
-    const captureData: Record<string, boolean | number | string> = {}
+    const captureIntFields = ['captureProxyPort', 'captureProxyMaxBodyKb', 'captureProxyRetentionDays',
+      'captureProxyMaxStoreMb'] as const
+    const captureData: Record<string, boolean | number | string | Record<string, string>> = {}
     for (const f of captureBoolFields) if (f in body) captureData[f] = Boolean(body[f])
     // Sane lower bounds — a retentionDays <= 0 would make maintenance delete ALL
-    // traffic; port/maxBodyKb must be positive.
+    // traffic; port/maxBodyKb must be positive. maxStoreMb may be 0 (= unlimited).
     const captureIntMin: Record<string, number> = {
       captureProxyPort: 1, captureProxyMaxBodyKb: 1, captureProxyRetentionDays: 1,
+      captureProxyMaxStoreMb: 0,
     }
     for (const f of captureIntFields) if (f in body) {
       const n = parseInt(String(body[f]), 10)
@@ -226,6 +235,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
     if ('captureProxyScope' in body && ['recon', 'agent', 'both'].includes(body.captureProxyScope)) {
       captureData.captureProxyScope = body.captureProxyScope
+    }
+    // Body-storage policy map (family -> policy). Sanitized against allowlists so a
+    // bad key/value can never reach the proxy env; unknown pairs are dropped.
+    if ('captureProxyBodyRules' in body) {
+      captureData.captureProxyBodyRules = sanitizeBodyRules(body.captureProxyBodyRules)
     }
     const captureEnabledProvided = 'captureProxyEnabled' in body
     const captureDesiredEnabled = captureEnabledProvided
@@ -265,6 +279,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
               storeBodies: settings.captureProxyStoreBodies,
               redactSecrets: settings.captureProxyRedactSecrets,
               scope: settings.captureProxyScope,
+              // Granular body-storage policy -> CAPTURE_* env at proxy spawn.
+              storeReqBodies: settings.captureProxyStoreReqBodies,
+              storeRespBodies: settings.captureProxyStoreRespBodies,
+              maxStoreMb: settings.captureProxyMaxStoreMb,
+              bodyRules: JSON.stringify(settings.captureProxyBodyRules ?? {}),
               // Egress-guard toggles -> CAPTURE_EGRESS_* env at proxy spawn.
               egressBlockEmptyHost: settings.captureEgressBlockEmptyHost,
               egressBlockHardGuardrail: settings.captureEgressBlockHardGuardrail,

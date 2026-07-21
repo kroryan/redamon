@@ -3,6 +3,7 @@ Docker container lifecycle management for recon processes
 """
 import asyncio
 import functools
+import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -981,6 +982,22 @@ class ContainerManager:
         redact = self._bool_env(config.get("redactSecrets"), os.environ.get("CAPTURE_PROXY_REDACT_SECRETS", "true"))
         blocked_ips = config.get("blockedIps") or os.environ.get("CAPTURE_BLOCKED_IPS", "")
 
+        # Granular body-storage policy -> CAPTURE_* env the proxy addon reads
+        # (capture_lib.decide_body / parse_body_rules). The addon fails safe on a
+        # bad bodyRules value, but normalize here so garbage never reaches the env.
+        store_req = self._bool_env(config.get("storeReqBodies"), os.environ.get("CAPTURE_STORE_REQ_BODIES", "true"))
+        store_resp = self._bool_env(config.get("storeRespBodies"), os.environ.get("CAPTURE_STORE_RESP_BODIES", "true"))
+        max_store_mb = str(config.get("maxStoreMb") if config.get("maxStoreMb") is not None
+                           else os.environ.get("CAPTURE_MAX_STORE_MB", "5"))
+        body_rules = config.get("bodyRules") or os.environ.get("CAPTURE_BODY_RULES", "")
+        if body_rules:
+            try:
+                # accept a dict or JSON string; re-serialize compactly
+                parsed = body_rules if isinstance(body_rules, dict) else json.loads(body_rules)
+                body_rules = json.dumps(parsed, separators=(",", ":")) if isinstance(parsed, dict) else ""
+            except (ValueError, TypeError):
+                body_rules = ""
+
         # Egress-guard toggles (Global Settings > TrafficMind). Each config key maps
         # to a CAPTURE_EGRESS_* env the proxy addon reads (egress.policy_from_env).
         # Default is block (True); an omitted/None key keeps the always-on guard.
@@ -1027,6 +1044,10 @@ class ContainerManager:
                 "CAPTURE_BODIES_DIR": "/bodies",
                 "CAPTURE_PROXY_MAX_BODY_KB": max_body_kb,
                 "CAPTURE_PROXY_STORE_BODIES": store_bodies,
+                "CAPTURE_STORE_REQ_BODIES": store_req,
+                "CAPTURE_STORE_RESP_BODIES": store_resp,
+                "CAPTURE_MAX_STORE_MB": max_store_mb,
+                "CAPTURE_BODY_RULES": body_rules,
                 "CAPTURE_BLOCKED_IPS": blocked_ips,
                 **egress_env,
             },

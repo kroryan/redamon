@@ -2,10 +2,12 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Network, PanelRightOpen, Copy } from 'lucide-react'
+import { Network, PanelRightOpen, Copy, Settings } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
+import { useAuth } from '@/providers/AuthProvider'
 import { Drawer, useToast, useAlertModal, WikiInfoButton } from '@/components/ui'
 import { TrafficCaptureStatus } from '@/components/traffic/TrafficCaptureStatus'
+import { TrafficMindSettingsModal } from '@/components/traffic/TrafficMindSettingsModal'
 import {
   useTrafficList,
   useTrafficFacets,
@@ -58,13 +60,15 @@ function toCurl(d: TrafficDetail): string {
 }
 
 export default function TrafficPage() {
-  const { projectId, currentProject, isLoading: projectLoading } = useProject()
+  const { projectId, userId, currentProject, isLoading: projectLoading } = useProject()
+  const { isAdmin } = useAuth()
   const router = useRouter()
   const toast = useToast()
 
   const [filters, setFilters] = useState<TrafficFilters>(DEFAULT_FILTERS)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const list = useTrafficList(projectId, filters)
   const facets = useTrafficFacets(projectId)
@@ -185,7 +189,14 @@ export default function TrafficPage() {
         {total > 0 && (
           <button className={styles.clearBtn} onClick={handleDeleteAllMatching}>Delete all matching</button>
         )}
+        {isAdmin && (
+          <button className={styles.settingsBtn} onClick={() => setSettingsOpen(true)} title="TrafficMind global settings (admin)">
+            <Settings size={15} /> Settings
+          </button>
+        )}
       </div>
+
+      <TrafficMindSettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} userId={userId} />
 
       {/* Filters */}
       <div className={styles.filters}>

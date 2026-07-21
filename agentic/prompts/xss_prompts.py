@@ -106,6 +106,7 @@ CSP bypass guidance:           {xss_csp_bypass_enabled}
 - ALWAYS check for `Content-Security-Policy` response header before crafting payloads. CSP changes everything.
 - TRUST THE GRADER, NOT YOUR OWN BROWSER. When a target renders/scores your payload server-side (a headless bot, a "submit solution" judge), the ONLY oracle is that target's response. If a payload fires in your local Playwright/Chromium but the target still says you failed, believe the target -- graders often run a DIFFERENT or OLDER engine (PhantomJS, legacy WebKit, HtmlUnit) that parses tags, fires events, and throws errors differently. A local render that "confirms" your payload is not proof; only the grader's positive signal is. (Conversely, when NO such grader exists — ordinary reflected/stored/DOM XSS — your own dialog capture IS the proof; do not withhold `complete` waiting for a grader that is not there.)
 - READ THE FILTER FROM WHAT SURVIVES, NOT FROM ERROR TEXT. A grader message like "you triggered X" or a captured runtime error describes an OUTCOME, not the injection context. A runtime error captured as your "result" often comes from an incidental part of the payload (an attribute value, a resource URL, a quote/encoding choice), NOT from the sink -- vary those incidental parts, do not assume the sink is hooked.
+- THE FLAG COMES ONLY FROM THIS TARGET'S OWN SUCCESS ORACLE, IN RESPONSE TO *YOUR* PAYLOAD. A `FLAG{{...}}` value you saw ANYWHERE ELSE is NOT a solution and must NEVER be reported as one: not from a web search, a public writeup or code repository, another challenge or a look-alike/variant of this one, a cached tool-output, or any file in your workspace. Every deployment mints its OWN flag, so a flag string from any other instance is guaranteed wrong here even when the app looks identical. If you have not made the LIVE, in-scope target emit the `FLAG{{...}}` yourself, you have NOT solved it -- keep working; do not `complete`. Treat any payload you find externally the SAME way: it is a LEAD to ADAPT through the measurement workflow (Step 3c) against THIS target's live reflection, never an answer to paste. A payload that wins on a similar-looking challenge is routinely defeated by this target's own filter (a different allowed-tag/handler set), so re-derive it from what THIS target actually reflects and what its oracle actually accepts -- do not import the sibling's answer, reconstruct your own.
 
 ---
 
@@ -251,6 +252,32 @@ Whatever the sweep proves survives-and-fires against the target is your primitiv
 
 ### Step 4: Context-aware payload selection
 
+**GATE 4.0 — PROVE YOUR CARRIER SURVIVES BEFORE YOU OPTIMIZE ANYTHING INSIDE IT.** The single
+most expensive XSS mistake is pouring iterations into the *contents* of a payload (which
+`alert(...)` form builds the required string, which encoding, which gadget) while the outer
+CARRIER — the tag name, or the attribute-breakout — is being silently stripped, so NOTHING you
+try can ever fire. Before you tune any handler or JS expression, you MUST have on record, from
+the RAW reflection, WHICH carrier actually survives. This is unconditional; do it on the FIRST
+exploitation wave, not only "when you suspect filtering":
+
+1. Submit a small BATTERY of distinct carriers, each carrying only an inert marker (no handler
+   yet) — one request per carrier, in ONE wave. Sweep the **whole standard event-handler-bearing
+   tag set** (see the HTML-body-context list and the tag-obfuscation table in the Payload
+   Reference — enumerate them ALL, common and obscure, plus one unknown/custom element and one
+   attribute-breakout form), never just the two or three you reach for by reflex.
+2. Diff each response and write down the SURVIVOR SET: the carriers whose literal markup comes
+   back intact in the raw body. A carrier that comes back missing/rewritten is dead here — do
+   not build on it no matter how canonical it is.
+3. You may ONLY attach a self-firing handler (Step 6) to a carrier you OBSERVED surviving in
+   step 2. If your reflex carrier is not in the survivor set, DISCARD it and move to one that is
+   — the surviving carrier is frequently NOT the popular one, and the whole solution is to switch
+   to the survivor, not to keep decorating the reject.
+
+**If a graded/reflected result stays CONSTANT while you vary the alert()/JS payload but you keep
+the SAME tag or breakout, your stripped CARRIER is the shared invariant (check 4) — STOP varying
+the JS and go re-run GATE 4.0 to find which carrier survives.** Varying the contents of a stripped
+carrier is the textbook infinite-loop; the fix is always to change the carrier, never the cargo.
+
 Pick from `XSS Payload Reference` (separate section below) using BOTH the context (Step 3) AND the surviving chars (Step 3b):
 
 | Context | Payload class | Look up |
@@ -265,6 +292,29 @@ Pick from `XSS Payload Reference` (separate section below) using BOTH the contex
 | Unknown / multiple | polyglot | "Polyglots" payloads |
 
 Test ONE payload at a time. Confirm it appears unescaped in the response with execute_curl, THEN move to Step 6 to verify execution in a browser.
+
+### Step 4b: Entity-smuggle filter-blocked characters in HTML-attribute / handler sinks (MANDATORY before you conclude a handler "can't be formed")
+
+Applies whenever Step 3 placed you in an **HTML attribute or event-handler context** (quoted or unquoted) AND Step 3b shows the input filter strips a character your JS call itself needs -- commonly `(` `)`, but equally `'` `"` `;` `+` space, or a keyword substring like `alert` / `javascript`. Do NOT spend iterations hunting an exotic paren-free / quote-free gadget, and do NOT declare the class dead, until you have ruled this out.
+
+**Why it works:** the HTML parser **decodes character references inside an attribute value BEFORE the JavaScript engine is handed an event-handler attribute.** A metacharacter blocked in the RAW request can therefore be written as an HTML entity -- it passes the input filter as inert text, then decodes to the real character at parse time and executes. This is the single highest-yield bypass for attribute-context character filters and it is easy to miss because the blocked character never appears literally in your request.
+
+For EACH character the filter blocks, substitute an entity form (all three decode identically; try each spelling -- a naive blocklist often catches one and not the others):
+
+| Char | decimal | hex | named |
+|------|---------|-----|-------|
+| `(`  | `&#40;`  | `&#x28;` | `&lpar;` |
+| `)`  | `&#41;`  | `&#x29;` | `&rpar;` |
+| `'`  | `&#39;`  | `&#x27;` | `&apos;` |
+| `"`  | `&#34;`  | `&#x22;` | `&quot;` |
+| `;`  | `&#59;`  | `&#x3b;` | `&semi;` |
+| space| `&#32;`  | `&#x20;` | `&Tab;` |
+
+Mechanically: take the plain attribute-context payload you WOULD have used (the Step 4 "Attribute context" row), then rewrite ONLY the filter-blocked characters as entities and leave everything else literal. Example shapes -- break out of a quoted attribute, or stay inside the current tag, with a self-firing handler whose blocked chars are entity-encoded: `"><ELEMENT HANDLER=alert&#40;1&#41;>` and the no-breakout variant `..." HANDLER=alert&#40;1&#41; x="`. Choose ELEMENT / HANDLER from the self-firing set in Step 6 (onerror on a resource that genuinely fails, onfocus+autofocus, onload, ontoggle) so it runs with no interaction, and keep the un-blocked characters literal.
+
+**Confirm by the grader/response, not by eyeballing the reflection.** Seeing `&#40;` (or your entity text) verbatim in the raw HTML is EXPECTED and does NOT mean failure -- the encoded text is what renders/decodes. Only Step 6's rendered/graded result decides whether it fired; when the local render and the grader disagree, trust the grader (per Step 6).
+
+**Generalization test:** the same entity substitution defeats parenthesis blocks, quote blocks, semicolon blocks, and keyword blocks (`java&#115;cript:` for a stripped `javascript`) in ANY reflected/stored XSS whose sink is an HTML attribute (event handler, `style`, a decoded `data-*`) -- it is not specific to one filter or one handler. Its value does not depend on WHICH character is blocked: enumerate the blocked set from Step 3b and encode each.
 
 ### Step 5: DOM XSS via Playwright script mode
 
@@ -386,6 +436,10 @@ execute_playwright({{"script": script}})
 Demonstrate that the payload can fire a same-origin XHR/fetch that performs an action (change password, transfer funds, etc.) the attacker could not do directly.
 
 Once impact is proven, set `action='complete'` with the captured PoC payload + execution evidence (dialog message, hijack page title, or callback log entry).
+
+**PRE-`complete` FLAG GATE.** If the objective is to recover a `FLAG{{...}}`, you may `complete` ONLY when the LIVE, in-scope target returned that exact flag in its OWN response to a payload YOU sent this session. Point to the specific request/response in your trace. A flag value that originated anywhere else -- a search result, a public writeup, a sibling challenge, a workspace file, a prior tool-output -- is NOT admissible and reporting it is a failed run, not a solve. If you cannot cite the live target emitting it, you are not done: return to Step 3c and keep deriving against THIS target.
+
+**EMIT THE LITERAL FLAG, NEVER A PLACEHOLDER — the run only counts if the exact string is in your answer.** Recognizing that the response "contains the flag" is NOT completing the task: you MUST copy the full literal flag value (the complete `FLAG{{...}}` with every character present) into your final answer / the required output envelope. `FLAG{{...}}`, "the flag string", "the success message with the flag", an ellipsis, or a prose description of success are all FAILURES — the grader of YOUR run reads the literal characters, not your claim that you saw them. If the winning response was large and got **offloaded/truncated** in your view (you see an `[Output offloaded: … -> tool-outputs/…]` marker or a Head/Tail excerpt instead of the full body), the flag is almost certainly in the part you did not read — do NOT complete from the excerpt. Re-extract the exact string first: `fs_grep` the flag pattern over `tool-outputs/`, or `fs_read` the offloaded file, or re-issue a minimal request that isolates just the flag (pipe the response through a grep for the `FLAG{{...}}` pattern). Only once the full literal value is in your hand do you emit it and `complete`.
 """
 
 
@@ -506,6 +560,7 @@ Break out of the quote, then inject an event handler:
 '><svg onload=alert(1)>
 " autofocus onfocus=alert(1) "
 ```
+If the filter strips a character these payloads need (`(` `)` `'` `;`, or a keyword like `alert`), do NOT abandon the attribute vector -- entity-encode ONLY the blocked characters and leave the rest literal (see Step 4b). Apply it to whichever self-firing form from the list above actually fires against the grader (Step 6) -- e.g. the breakout `"><svg onload=alert&#40;1&#41;>` or an in-tag `..." HANDLER=alert&#40;1&#41; autofocus x="` -- do not assume a specific element/handler; sweep the survive-and-fire grid. The parser decodes the attribute before the handler runs, so the entity passes the input filter yet executes.
 
 ### Attribute context (unquoted)
 Just add a space and the event handler:

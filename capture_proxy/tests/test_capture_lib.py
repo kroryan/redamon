@@ -132,35 +132,197 @@ class TestPassiveSignals(unittest.TestCase):
         self.assertFalse(sig["reflectedParams"])  # len < 4
 
 
+def _decide(raw, *, family="text", rules=None, cap=1024, max_store=0, store=True):
+    """decide_body with test defaults (Recommended rules unless overridden)."""
+    return cl.decide_body(
+        raw, family=family, rules=rules if rules is not None else cl.DEFAULT_BODY_RULES,
+        inline_cap_bytes=cap, max_store_bytes=max_store, store=store)
+
+
 class TestDecideBody(unittest.TestCase):
     def test_small_text_inline(self):
-        inline, ref, size, sha = cl.decide_body(b"hello", 1024, True, True)
+        inline, ref, size, sha = _decide(b"hello", family="text")
         self.assertEqual(inline, "hello")
         self.assertIsNone(ref)
         self.assertEqual(size, 5)
         self.assertIsNotNone(sha)
 
     def test_large_text_offloaded(self):
-        raw = b"x" * 5000
-        inline, ref, size, sha = cl.decide_body(raw, 1024, True, True)
+        inline, ref, size, sha = _decide(b"x" * 5000, family="text", cap=1024)
         self.assertIsNone(inline)
         self.assertEqual(ref, sha)
         self.assertEqual(size, 5000)
 
-    def test_binary_always_offloaded(self):
-        inline, ref, size, sha = cl.decide_body(b"\x00\x01\x02", 1024, True, False)
+    def test_binary_family_auto_offloaded(self):
+        # A binary family under 'auto' never inlines, even when small.
+        inline, ref, size, sha = _decide(b"\x00\x01\x02", family="binary",
+                                         rules={"binary": "auto"})
         self.assertIsNone(inline)
         self.assertEqual(ref, sha)
 
-    def test_store_bodies_off(self):
-        inline, ref, size, sha = cl.decide_body(b"hello", 1024, False, True)
+    def test_store_master_off(self):
+        inline, ref, size, sha = _decide(b"hello", family="text", store=False)
         self.assertIsNone(inline)
         self.assertIsNone(ref)
         self.assertEqual(size, 5)      # size + sha still recorded
         self.assertIsNotNone(sha)
 
     def test_none_body(self):
-        self.assertEqual(cl.decide_body(None, 1024, True, True), (None, None, 0, None))
+        self.assertEqual(_decide(None), (None, None, 0, None))
+
+    # ── policy matrix ──────────────────────────────────────────────────────
+    def test_policy_meta_drops_bytes(self):
+        # Recommended default: image -> meta. Small or large, bytes are dropped.
+        inline, ref, size, sha = _decide(b"\x89PNG" + b"x" * 50, family="image")
+        self.assertIsNone(inline)
+        self.assertIsNone(ref)          # not offloaded either
+        self.assertEqual(size, 54)
+        self.assertIsNotNone(sha)       # metadata still kept
+
+    def test_policy_disk_forces_offload_small_binary(self):
+        # Recommended default: document -> disk, even a tiny one.
+        inline, ref, size, sha = _decide(b"%PDF-1.4", family="document")
+        self.assertIsNone(inline)
+        self.assertEqual(ref, sha)
+
+    def test_policy_inline_forces_db_over_size_but_falls_back(self):
+        small = _decide(b"x" * 10, family="image", rules={"image": "inline"}, cap=1024)
+        self.assertEqual(small[0], "x" * 10)       # forced inline
+        big = _decide(b"x" * 2000, family="image", rules={"image": "inline"}, cap=1024)
+        self.assertIsNone(big[0])                  # too big to inline -> disk
+        self.assertEqual(big[1], big[3])
+
+    def test_max_store_ceiling_drops_to_meta(self):
+        # document -> disk, but a hard 1 KB ceiling forces metadata-only.
+        inline, ref, size, sha = _decide(b"x" * 2000, family="document", max_store=1024)
+        self.assertIsNone(inline)
+        self.assertIsNone(ref)          # ceiling wins over 'disk'
+        self.assertEqual(size, 2000)
+        self.assertIsNotNone(sha)
+
+    def test_max_store_ceiling_zero_means_unlimited(self):
+        inline, ref, size, sha = _decide(b"x" * 10_000, family="document", max_store=0)
+        self.assertEqual(ref, sha)      # offloaded, no ceiling
+
+    def test_json_auto_inline(self):
+        inline, ref, _, _ = _decide(b'{"a":1}', family="json")
+        self.assertEqual(inline, '{"a":1}')
+
+    def test_ceiling_below_inline_cap_drops_small_text(self):
+        # A ceiling smaller than the body forces meta even for small inline text.
+        inline, ref, size, sha = _decide(b"x" * 100, family="text", cap=1024, max_store=50)
+        self.assertIsNone(inline)
+        self.assertIsNone(ref)
+        self.assertEqual(size, 100)
+        self.assertIsNotNone(sha)
+
+    def test_negative_ceiling_means_unlimited(self):
+        # Defensive: a negative max_store is treated as no ceiling (like 0).
+        inline, ref, size, sha = _decide(b"x" * 5000, family="document", max_store=-1)
+        self.assertEqual(ref, sha)     # offloaded, not dropped
+
+    def test_meta_policy_ignores_ceiling_and_cap(self):
+        # meta drops regardless of size or ceiling; sha/size still recorded.
+        inline, ref, size, sha = _decide(b"x" * 3, family="image", max_store=999999)
+        self.assertIsNone(inline)
+        self.assertIsNone(ref)
+        self.assertEqual(size, 3)
+        self.assertIsNotNone(sha)
+
+
+class TestClassifyFamily(unittest.TestCase):
+    def test_by_content_type(self):
+        cases = {
+            "text/html; charset=utf-8": "text",
+            "application/json": "json",
+            "text/css": "text",
+            "application/javascript": "script",
+            "image/png": "image",
+            "font/woff2": "font",
+            "video/mp4": "video",
+            "audio/mpeg": "audio",
+            "application/pdf": "document",
+            "application/zip": "archive",
+            "application/octet-stream": "binary",
+            "application/wasm": "binary",
+        }
+        for ct, fam in cases.items():
+            self.assertEqual(cl.classify_family(ct), fam, ct)
+
+    def test_octet_stream_reclassified_by_extension(self):
+        # The real-world woff2-as-octet-stream case that started all this.
+        self.assertEqual(
+            cl.classify_family("application/octet-stream", "/static/f/Game.woff2"), "font")
+        self.assertEqual(
+            cl.classify_family("application/octet-stream", "/dl/report.pdf"), "document")
+        # A genuine octet-stream download with no telling extension stays binary.
+        self.assertEqual(cl.classify_family("application/octet-stream", "/dl/blob"), "binary")
+
+    def test_extension_fallback_when_no_content_type(self):
+        self.assertEqual(cl.classify_family(None, "/a/b/logo.PNG"), "image")
+        self.assertEqual(cl.classify_family("", "/x.woff2?v=3"), "font")
+
+    def test_unknown_is_other(self):
+        self.assertEqual(cl.classify_family("application/x-weird-thing", "/x"), "other")
+        self.assertEqual(cl.classify_family(None, None), "other")
+
+    def test_ambiguous_content_types_resolve_by_precedence(self):
+        # document is checked before text, so text/rtf is a document not text.
+        self.assertEqual(cl.classify_family("text/rtf", "/x"), "document")
+        # script is checked before text, so text/javascript is a script.
+        self.assertEqual(cl.classify_family("text/javascript", "/a.js"), "script")
+        # image is checked before text, so image/svg+xml is an image (not xml/text).
+        self.assertEqual(cl.classify_family("image/svg+xml", "/logo.svg"), "image")
+        # +json suffix types are json.
+        self.assertEqual(cl.classify_family("application/ld+json", "/x"), "json")
+        self.assertEqual(cl.classify_family("application/manifest+json", "/x"), "json")
+        # application/xml is text-family.
+        self.assertEqual(cl.classify_family("application/xml", "/x"), "text")
+        # explicit font content-type.
+        self.assertEqual(cl.classify_family("application/font-woff", "/x"), "font")
+
+    def test_dot_in_directory_not_treated_as_extension(self):
+        # "/a.b/c" has a dot in the DIRECTORY, not the filename -> no ext family.
+        self.assertEqual(cl.classify_family("", "/a.b/c"), "other")
+        # trailing-slash path, no filename.
+        self.assertEqual(cl.classify_family(None, "/dir/"), "other")
+
+    def test_explicit_content_type_wins_over_mismatched_extension(self):
+        # A real image content-type is trusted over a misleading .pdf path.
+        self.assertEqual(cl.classify_family("image/png", "/x.pdf"), "image")
+        # Only the generic octet-stream defers to the extension.
+        self.assertEqual(cl.classify_family("application/octet-stream", "/x.pdf"), "document")
+
+    def test_every_classified_family_has_a_default_rule(self):
+        # Guard against drift: any family classify_family can emit must be a key in
+        # DEFAULT_BODY_RULES, else decide_body silently falls back to 'auto'.
+        emit = set(fam for fam, _ in cl._CT_FAMILY) | set(cl._EXT_FAMILY.values()) | {"other"}
+        for fam in emit:
+            self.assertIn(fam, cl.DEFAULT_BODY_RULES, fam)
+
+
+class TestParseBodyRules(unittest.TestCase):
+    def test_empty_returns_recommended_defaults(self):
+        self.assertEqual(cl.parse_body_rules(""), cl.DEFAULT_BODY_RULES)
+        self.assertEqual(cl.parse_body_rules(None), cl.DEFAULT_BODY_RULES)
+
+    def test_override_merges_over_defaults(self):
+        rules = cl.parse_body_rules('{"image": "disk", "document": "meta"}')
+        self.assertEqual(rules["image"], "disk")     # overridden
+        self.assertEqual(rules["document"], "meta")  # overridden
+        self.assertEqual(rules["json"], "auto")      # default preserved
+
+    def test_invalid_family_or_policy_ignored(self):
+        rules = cl.parse_body_rules('{"image": "banana", "bogusfam": "disk"}')
+        self.assertEqual(rules["image"], "meta")     # bad policy ignored -> default
+        self.assertNotIn("bogusfam", rules)          # unknown family dropped
+
+    def test_malformed_json_falls_back_to_defaults(self):
+        self.assertEqual(cl.parse_body_rules("{not json"), cl.DEFAULT_BODY_RULES)
+
+    def test_accepts_dict_directly(self):
+        rules = cl.parse_body_rules({"font": "disk"})
+        self.assertEqual(rules["font"], "disk")
 
 
 class TestBuildRecord(unittest.TestCase):

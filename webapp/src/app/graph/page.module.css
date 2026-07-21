@@ -47,3 +47,30 @@
   margin: 0;
   max-width: 400px;
 }
+
+.nodeCap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.nodeCap h2 {
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.nodeCap p {
+  font-size: var(--text-sm);
+  margin: 0;
+  max-width: 480px;
+  line-height: 1.6;
+}

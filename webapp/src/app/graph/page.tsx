@@ -43,6 +43,7 @@ import { useGraphData, useDimensions, useNodeSelection, useTableData, useGraphVi
 import { useStableGraphData } from './hooks/useStableGraphData'
 import { exportToCsv, exportToJson, exportToMarkdown } from './utils/exportCsv'
 import { clusterGraphData } from './utils/clusterNodes'
+import { isOverNodeCap } from './utils/nodeCap'
 import { useTheme, useSession, useReconStatus, useReconSSE, useGvmStatus, useGvmSSE, useGithubHuntStatus, useGithubHuntSSE, useTrufflehogStatus, useTrufflehogSSE, useActiveSessions, useMultiPartialReconStatus, useMultiPartialReconSSE } from '@/hooks'
 import { useProjectById } from '@/hooks/useProjects'
 import { useGraphTypeFilterPrefs, useGraphViewPrefs } from '@/hooks/useUserPreferences'
@@ -645,13 +646,21 @@ export default function GraphPage() {
     return { ...data, nodes: filteredNodes, links: filteredLinks }
   }, [data, activeNodeTypes, nodeTypes.length, hiddenSessions, CHAIN_NODE_TYPES])
 
+  // Hard render cap: measured on the node set clustering would actually process
+  // (active saved-filter view, or the type/session-filtered set) — not the raw
+  // unfiltered graph — so a large project narrowed by a filter still renders.
+  const renderSource = filterGraphData ?? filteredGraphData
+  const overNodeCap = isOverNodeCap(renderSource?.nodes.length ?? 0)
+
   // Clustered graph data for GraphCanvas (collapses >30 same-type leaf neighbors sharing a parent).
   // Applied AFTER filtering so hiding a child type also dissolves its clusters.
+  // Skipped entirely when over the hard cap — clustering is the expensive step that would freeze the tab.
   const clusteredGraphData = useMemo(() => {
+    if (overNodeCap) return undefined
     const src = filterGraphData ?? filteredGraphData
     if (!src) return undefined
     return clusterGraphData(src)
-  }, [filterGraphData, filteredGraphData])
+  }, [overNodeCap, filterGraphData, filteredGraphData])
 
   // Stable graph data for GraphCanvas: preserves node object identity across
   // refetches and pre-resolves link source/target string ids to node refs.
@@ -1347,20 +1356,30 @@ export default function GraphPage() {
 
         <div ref={contentRef} className={styles.content}>
           {activeView === 'graph' ? (
-            <GraphCanvas
-              data={stableGraphData}
-              isLoading={filterLoading || isLoading}
-              error={error}
-              projectId={projectId || ''}
-              is3D={effectiveIs3D}
-              width={dimensions.width}
-              height={dimensions.height}
-              showLabels={showLabels}
-              selectedNode={selectedNode}
-              onNodeClick={handleNodeClick}
-              isDark={isDark}
-              activeChainId={sessionId}
-            />
+            overNodeCap ? (
+              <div className={styles.nodeCap}>
+                <h2>Graph too large to render</h2>
+                <p>
+                  This graph has more than 100,000 nodes. Rendering is disabled to keep your
+                  browser responsive. To review the recon data, consult the Node inspector section instead.
+                </p>
+              </div>
+            ) : (
+              <GraphCanvas
+                data={stableGraphData}
+                isLoading={filterLoading || isLoading}
+                error={error}
+                projectId={projectId || ''}
+                is3D={effectiveIs3D}
+                width={dimensions.width}
+                height={dimensions.height}
+                showLabels={showLabels}
+                selectedNode={selectedNode}
+                onNodeClick={handleNodeClick}
+                isDark={isDark}
+                activeChainId={sessionId}
+              />
+            )
           ) : activeView === 'graphViews' ? (
             <GraphViews
               projectId={projectId || ''}

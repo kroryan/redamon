@@ -432,6 +432,10 @@ services:
       CAPTURE_PROXY_PORT: ${CAPTURE_PROXY_PORT:-8888}
       CAPTURE_PROXY_MAX_BODY_KB: ${CAPTURE_PROXY_MAX_BODY_KB:-64}
       CAPTURE_PROXY_STORE_BODIES: ${CAPTURE_PROXY_STORE_BODIES:-true}
+      CAPTURE_STORE_REQ_BODIES: ${CAPTURE_STORE_REQ_BODIES:-true}
+      CAPTURE_STORE_RESP_BODIES: ${CAPTURE_STORE_RESP_BODIES:-true}
+      CAPTURE_MAX_STORE_MB: ${CAPTURE_MAX_STORE_MB:-5}
+      CAPTURE_BODY_RULES: ${CAPTURE_BODY_RULES:-}
       CAPTURE_PROXY_REDACT_SECRETS: ${CAPTURE_PROXY_REDACT_SECRETS:-true}
       CAPTURE_BLOCKED_IPS: ${CAPTURE_BLOCKED_IPS:-}
       # The orchestrator's OWN trusted webapp URL for credentialed pre-flight
@@ -920,6 +924,10 @@ services:
       CAPTURE_BODIES_DIR: /bodies
       CAPTURE_PROXY_MAX_BODY_KB: "${CAPTURE_PROXY_MAX_BODY_KB:-64}"
       CAPTURE_PROXY_STORE_BODIES: "${CAPTURE_PROXY_STORE_BODIES:-true}"
+      CAPTURE_STORE_REQ_BODIES: "${CAPTURE_STORE_REQ_BODIES:-true}"
+      CAPTURE_STORE_RESP_BODIES: "${CAPTURE_STORE_RESP_BODIES:-true}"
+      CAPTURE_MAX_STORE_MB: "${CAPTURE_MAX_STORE_MB:-5}"
+      CAPTURE_BODY_RULES: "${CAPTURE_BODY_RULES:-}"
       # Extra RedAmon service IPs the proxy must never reach (defense in depth on
       # top of the RFC1918/loopback denylist; pentest-net placement already blocks).
       # ALWAYS enforced; never gated by the CAPTURE_EGRESS_* toggles below.
